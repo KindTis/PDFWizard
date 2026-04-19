@@ -1,0 +1,316 @@
+:root {
+  font-family: "Pretendard", "Noto Sans KR", sans-serif;
+  color: #152238;
+  --page-bg-a: #e8f0ff;
+  --page-bg-b: #f8fafc;
+  --page-bg-c: #f8f3e8;
+  --surface: #ffffffd9;
+  --surface-strong: #ffffff;
+  --line: #c6d4e7;
+  --line-strong: #8ea7c7;
+  --text-dim: #4c5f78;
+  --accent: #0066db;
+  --accent-soft: #e8f2ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 480px at 0% 0%, var(--page-bg-a), transparent 68%),
+    radial-gradient(900px 420px at 100% 10%, var(--page-bg-c), transparent 65%),
+    linear-gradient(165deg, var(--page-bg-b) 0%, #f5f9ff 55%, #f8f7f2 100%);
+}
+
+.app-shell {
+  min-height: 100vh;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px 24px 36px;
+}
+
+.step-header {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(160deg, #ffffffde 0%, #eef6ffd1 100%);
+  box-shadow: 0 10px 26px rgba(21, 34, 56, 0.08);
+}
+
+.step-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #ffffffaa;
+  color: var(--text-dim);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.step-chip em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.step-chip.is-done {
+  border-color: #b8cce7;
+  background: #edf5ff;
+  color: #325b87;
+}
+
+.step-chip.is-active {
+  border-color: #5a8fcf;
+  background: linear-gradient(155deg, #ffffff 0%, #e7f1ff 100%);
+  color: #0f4f94;
+  box-shadow: inset 0 0 0 1px #a8c7ef;
+}
+
+.layout {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+}
+
+.control-sidebar {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.action-panel,
+.control-sidebar aside,
+[aria-label='썸네일 작업 영역'],
+[aria-label='파일 업로드 영역'] {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(21, 34, 56, 0.06);
+}
+
+[aria-label='썸네일 작업 영역'] > h2,
+[aria-label='파일 업로드 영역'] > h2,
+.action-panel > h2,
+[aria-label='진행 상태 패널'] > h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.action-panel [role='tablist'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action-panel [role='tab'] {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 7px 13px;
+  background: #f4f8ff;
+  color: #25466e;
+  font-weight: 600;
+}
+
+.action-panel [role='tab'][aria-selected='true'] {
+  border-color: #4f84c2;
+  background: linear-gradient(160deg, #ffffff 0%, #dbeaff 100%);
+  color: #0f4f94;
+  box-shadow: inset 0 0 0 1px #9fc0eb;
+}
+
+.upload-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border: 1px solid #5f8fc9;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: linear-gradient(155deg, #ffffff 0%, #eaf3ff 100%);
+  color: #154a87;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.upload-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.uploaded-file-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #27466e;
+}
+
+.uploaded-file-list li + li {
+  margin-top: 4px;
+}
+
+.action-buttons {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.action-buttons button {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 7px 13px;
+  background: linear-gradient(155deg, #ffffff 0%, #edf5ff 100%);
+  color: #20486f;
+  font-weight: 700;
+}
+
+.action-buttons button:disabled {
+  opacity: 0.45;
+}
+
+.export-panel button {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 7px 13px;
+  background: linear-gradient(155deg, #ffffff 0%, #edf5ff 100%);
+  color: #20486f;
+  font-weight: 700;
+}
+
+.export-panel button:disabled {
+  opacity: 0.45;
+}
+
+.progress-error {
+  color: #ad1f1f;
+  font-weight: 700;
+}
+
+.error-panel {
+  border: 1px solid #d33;
+  background: #fff2f2;
+}
+
+.split-range-visual {
+  margin-top: 8px;
+  margin-bottom: 10px;
+}
+
+.split-range-track {
+  position: relative;
+  width: 100%;
+  height: 16px;
+  border-radius: 999px;
+  background: repeating-linear-gradient(
+    90deg,
+    #dfe9f8 0px,
+    #dfe9f8 14px,
+    #f5f9ff 14px,
+    #f5f9ff 18px
+  );
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.split-range-track__active {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(155deg, #ff9191 0%, #ef4444 100%);
+}
+
+.split-range-controls,
+.split-range-sliders {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.split-range-controls label,
+.split-range-sliders label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: #2e4967;
+}
+
+.split-range-controls input[type='number'],
+.split-range-sliders input[type='range'] {
+  width: 100%;
+}
+
+.split-group-list {
+  margin: 10px 0 0;
+  padding-left: 16px;
+}
+
+.split-group-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.split-group-item__header button {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: #fff;
+  color: #32567d;
+  font-weight: 600;
+}
+
+.split-range-track--group {
+  margin-bottom: 10px;
+  height: 12px;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    padding: 16px;
+  }
+
+  .step-header {
+    grid-template-columns: 1fr;
+  }
+
+  .split-range-controls,
+  .split-range-sliders {
+    grid-template-columns: 1fr;
+  }
+}
