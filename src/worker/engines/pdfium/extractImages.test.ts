@@ -171,4 +171,125 @@ describe('createPdfiumExtractImagesAdapter', () => {
     });
     expect(lowLevelWithoutConvert.FPDFPage_CountObjects).toHaveBeenCalledWith(21);
   });
+
+  it('does not re-encode jpeg when output format is forced to jpg', async () => {
+    const module = createMockLowLevelModule({
+      rawBytes: [0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43],
+      filterName: 'DCTDecode',
+      pageObjectTypes: [3],
+    });
+    module.convertImage.mockResolvedValue(new Uint8Array([9, 9, 9]));
+    const runtime = { load: vi.fn().mockResolvedValue(module) };
+    const adapter = createPdfiumExtractImagesAdapter(runtime);
+
+    const result = await adapter.extractImages(
+      { id: 'f1', name: 'photo.pdf', bytes: new Uint8Array([1, 2, 3]).buffer },
+      { preserveOriginal: false, forceOutputFormat: 'jpg', quality: 70 },
+    );
+
+    expect(module.convertImage).not.toHaveBeenCalled();
+    expect(result).toEqual([
+      {
+        name: 'photo-p1-o1-img-1.jpg',
+        mime: 'image/jpeg',
+        bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43]),
+        metadata: {
+          converted: false,
+          source: 'jpeg',
+          output: 'jpeg',
+          sourceEncoding: 'jpeg',
+          outputEncoding: 'jpeg',
+        },
+      },
+    ]);
+  });
+
+  it('repackages flatedecode raw bytes to real png in preserve mode when converter exists', async () => {
+    const module = createMockLowLevelModule({
+      rawBytes: [0x78, 0x9c, 0x01, 0x02, 0x03],
+      filterName: 'FlateDecode',
+      pageObjectTypes: [3],
+    });
+    const repackaged = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    module.convertImage.mockResolvedValue(repackaged);
+    const runtime = { load: vi.fn().mockResolvedValue(module) };
+    const adapter = createPdfiumExtractImagesAdapter(runtime);
+
+    const result = await adapter.extractImages(
+      { id: 'f1', name: 'flate.pdf', bytes: new Uint8Array([1, 2, 3]).buffer },
+      { preserveOriginal: true },
+    );
+
+    expect(module.convertImage).toHaveBeenCalledWith(new Uint8Array([0x78, 0x9c, 0x01, 0x02, 0x03]), 'png', 100);
+    expect(result).toEqual([
+      {
+        name: 'flate-p1-o1-img-1.png',
+        mime: 'image/png',
+        bytes: repackaged,
+        metadata: {
+          converted: true,
+          source: 'png',
+          output: 'png',
+          sourceEncoding: 'png',
+          outputEncoding: 'png',
+        },
+      },
+    ]);
+  });
+
+  it('repackages flatedecode raw bytes to png via rendered bitmap when converter is missing', async () => {
+    const module = createMockLowLevelModule({
+      rawBytes: [0x78, 0x9c, 0x01, 0x02, 0x03],
+      filterName: 'FlateDecode',
+      pageObjectTypes: [3],
+    });
+    const lowLevelWithoutConvert = {
+      ...module,
+      convertImage: undefined,
+      FPDFImageObj_GetRenderedBitmap: vi.fn().mockReturnValue(900),
+      FPDFBitmap_GetBuffer: vi.fn().mockReturnValue(1200),
+      FPDFBitmap_GetWidth: vi.fn().mockReturnValue(1),
+      FPDFBitmap_GetHeight: vi.fn().mockReturnValue(1),
+      FPDFBitmap_GetStride: vi.fn().mockReturnValue(4),
+      FPDFBitmap_GetFormat: vi.fn().mockReturnValue(4),
+      FPDFBitmap_Destroy: vi.fn(),
+    };
+    lowLevelWithoutConvert.pdfium.HEAPU8.set([0, 0, 255, 255], 1200);
+
+    const runtime = { load: vi.fn().mockResolvedValue(lowLevelWithoutConvert) };
+    const adapter = createPdfiumExtractImagesAdapter(runtime);
+    const pngSignature = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    const originalOffscreenCanvas = (globalThis as { OffscreenCanvas?: unknown }).OffscreenCanvas;
+    (globalThis as { OffscreenCanvas?: unknown }).OffscreenCanvas = class {
+      getContext() {
+        return {
+          createImageData: (_w: number, _h: number) => ({ data: new Uint8ClampedArray(4) }),
+          putImageData: () => {},
+        };
+      }
+
+      async convertToBlob() {
+        return new Blob([pngSignature], { type: 'image/png' });
+      }
+    };
+
+    try {
+      const result = await adapter.extractImages(
+        { id: 'f1', name: 'rendered.pdf', bytes: new Uint8Array([7, 8, 9]).buffer },
+        { preserveOriginal: true },
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        name: 'rendered-p1-o1-img-1.png',
+        mime: 'image/png',
+      });
+      expect(result[0].bytes).toEqual(pngSignature);
+      expect(lowLevelWithoutConvert.FPDFImageObj_GetRenderedBitmap).toHaveBeenCalledWith(11, 21, 301);
+      expect(lowLevelWithoutConvert.FPDFBitmap_Destroy).toHaveBeenCalledWith(900);
+    } finally {
+      (globalThis as { OffscreenCanvas?: unknown }).OffscreenCanvas = originalOffscreenCanvas;
+    }
+  });
 });

@@ -19,8 +19,8 @@ describe('App flow layout', () => {
     expect(within(actionPanel).getByRole('tab', { name: '분할' })).toBeInTheDocument();
     expect(within(actionPanel).getByRole('tab', { name: '이미지 추출' })).toBeInTheDocument();
     expect(within(actionPanel).getByRole('tab', { name: '페이지→이미지' })).toBeInTheDocument();
-    expect(within(actionPanel).getByLabelText('원본 유지')).toBeInTheDocument();
-    expect(within(actionPanel).getByLabelText('강제 PNG/JPG 변환')).toBeInTheDocument();
+    expect(within(actionPanel).queryByLabelText('원본 유지')).not.toBeInTheDocument();
+    expect(within(actionPanel).queryByLabelText('강제 PNG/JPG 변환')).not.toBeInTheDocument();
 
     const progressPanel = screen.getByLabelText('진행 상태 패널');
     expect(progressPanel).toBeInTheDocument();

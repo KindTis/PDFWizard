@@ -6,6 +6,10 @@ import type { SupportedEncoding } from '../../policies/imageExtractionPolicy';
 import type { PdfiumRuntime } from './runtime';
 
 const FPDF_PAGEOBJ_IMAGE = 3;
+const FPDFBitmap_Gray = 1;
+const FPDFBitmap_BGR = 2;
+const FPDFBitmap_BGRx = 3;
+const FPDFBitmap_BGRA = 4;
 
 type OutputEncoding = 'png' | 'jpg' | 'jpeg' | 'jpx' | 'jbig2' | 'ccitt';
 
@@ -41,8 +45,15 @@ type PdfiumLowLevelModule = {
   FPDFPage_GetObject: (page: number, objectIndex: number) => number;
   FPDFPageObj_GetType: (pageObject: number) => number;
   FPDFImageObj_GetImageDataRaw: (imageObject: number, buffer: number, buflen: number) => number;
+  FPDFImageObj_GetRenderedBitmap?: (document: number, page: number, imageObject: number) => number;
   FPDFImageObj_GetImageFilterCount?: (imageObject: number) => number;
   FPDFImageObj_GetImageFilter?: (imageObject: number, filterIndex: number, buffer: number, buflen: number) => number;
+  FPDFBitmap_GetBuffer?: (bitmap: number) => number;
+  FPDFBitmap_GetWidth?: (bitmap: number) => number;
+  FPDFBitmap_GetHeight?: (bitmap: number) => number;
+  FPDFBitmap_GetStride?: (bitmap: number) => number;
+  FPDFBitmap_GetFormat?: (bitmap: number) => number;
+  FPDFBitmap_Destroy?: (bitmap: number) => void;
   convertImage?: (bytes: Uint8Array, output: 'png' | 'jpg', quality: number) => Promise<Uint8Array>;
 };
 
@@ -152,6 +163,175 @@ function detectEncodingFromBytes(bytes: Uint8Array): SupportedEncoding {
   return 'png';
 }
 
+function isPngContainer(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  );
+}
+
+function hasRenderedBitmapApis(module: PdfiumLowLevelModule): module is PdfiumLowLevelModule &
+  Required<
+    Pick<
+      PdfiumLowLevelModule,
+      | 'FPDFImageObj_GetRenderedBitmap'
+      | 'FPDFBitmap_GetBuffer'
+      | 'FPDFBitmap_GetWidth'
+      | 'FPDFBitmap_GetHeight'
+      | 'FPDFBitmap_GetStride'
+      | 'FPDFBitmap_GetFormat'
+      | 'FPDFBitmap_Destroy'
+    >
+  > {
+  return (
+    typeof module.FPDFImageObj_GetRenderedBitmap === 'function' &&
+    typeof module.FPDFBitmap_GetBuffer === 'function' &&
+    typeof module.FPDFBitmap_GetWidth === 'function' &&
+    typeof module.FPDFBitmap_GetHeight === 'function' &&
+    typeof module.FPDFBitmap_GetStride === 'function' &&
+    typeof module.FPDFBitmap_GetFormat === 'function' &&
+    typeof module.FPDFBitmap_Destroy === 'function'
+  );
+}
+
+function convertBitmapToRgba(
+  src: Uint8Array,
+  width: number,
+  height: number,
+  stride: number,
+  format: number,
+): Uint8Array | null {
+  if (width <= 0 || height <= 0 || stride <= 0) {
+    return null;
+  }
+
+  const out = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const outIndex = (y * width + x) * 4;
+      const rowBase = y * stride;
+      if (format === FPDFBitmap_Gray) {
+        const sourceIndex = rowBase + x;
+        const g = src[sourceIndex] ?? 0;
+        out[outIndex] = g;
+        out[outIndex + 1] = g;
+        out[outIndex + 2] = g;
+        out[outIndex + 3] = 255;
+        continue;
+      }
+
+      if (format === FPDFBitmap_BGR || format === FPDFBitmap_BGRx || format === FPDFBitmap_BGRA) {
+        const bytesPerPixel = format === FPDFBitmap_BGR ? 3 : 4;
+        const sourceIndex = rowBase + x * bytesPerPixel;
+        const b = src[sourceIndex] ?? 0;
+        const g = src[sourceIndex + 1] ?? 0;
+        const r = src[sourceIndex + 2] ?? 0;
+        const a = format === FPDFBitmap_BGRA ? src[sourceIndex + 3] ?? 255 : 255;
+        out[outIndex] = r;
+        out[outIndex + 1] = g;
+        out[outIndex + 2] = b;
+        out[outIndex + 3] = a;
+        continue;
+      }
+
+      return null;
+    }
+  }
+
+  return out;
+}
+
+type CanvasContext2DLike = {
+  createImageData?: (width: number, height: number) => { data: Uint8ClampedArray };
+  putImageData: (imageData: { data: Uint8ClampedArray }, dx: number, dy: number) => void;
+};
+
+type OffscreenCanvasLike = {
+  getContext: (contextId: '2d') => CanvasContext2DLike | null;
+  convertToBlob?: (options?: { type?: string; quality?: number }) => Promise<Blob>;
+};
+
+async function encodeRgbaToPng(bytes: Uint8Array, width: number, height: number): Promise<Uint8Array | null> {
+  const CanvasCtor = (globalThis as { OffscreenCanvas?: new (w: number, h: number) => OffscreenCanvasLike }).OffscreenCanvas;
+  if (typeof CanvasCtor !== 'function') {
+    return null;
+  }
+
+  const canvas = new CanvasCtor(width, height);
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return null;
+  }
+
+  const clamped = new Uint8ClampedArray(bytes.length);
+  clamped.set(bytes);
+  const ImageDataCtor = (globalThis as {
+    ImageData?: new (data: Uint8ClampedArray, width: number, height: number) => { data: Uint8ClampedArray };
+  }).ImageData;
+  let imageData: { data: Uint8ClampedArray } | null = null;
+  if (typeof ImageDataCtor === 'function') {
+    imageData = new ImageDataCtor(clamped, width, height);
+  } else if (typeof context.createImageData === 'function') {
+    imageData = context.createImageData(width, height);
+    imageData.data.set(clamped);
+  }
+  if (!imageData) {
+    return null;
+  }
+
+  context.putImageData(imageData, 0, 0);
+  if (typeof canvas.convertToBlob !== 'function') {
+    return null;
+  }
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function renderImageObjectAsPng(
+  module: PdfiumLowLevelModule,
+  document: number,
+  page: number,
+  imageObject: number,
+): Promise<Uint8Array | null> {
+  if (!hasRenderedBitmapApis(module)) {
+    return null;
+  }
+
+  const bitmap = module.FPDFImageObj_GetRenderedBitmap(document, page, imageObject);
+  if (!bitmap) {
+    return null;
+  }
+
+  try {
+    const width = module.FPDFBitmap_GetWidth(bitmap);
+    const height = module.FPDFBitmap_GetHeight(bitmap);
+    const stride = module.FPDFBitmap_GetStride(bitmap);
+    const format = module.FPDFBitmap_GetFormat(bitmap);
+    const bufferPtr = module.FPDFBitmap_GetBuffer(bitmap);
+    if (width <= 0 || height <= 0 || stride <= 0 || bufferPtr <= 0) {
+      return null;
+    }
+
+    const totalBytes = stride * height;
+    const src = new Uint8Array(module.pdfium.HEAPU8.subarray(bufferPtr, bufferPtr + totalBytes));
+    const rgba = convertBitmapToRgba(src, width, height, stride, format);
+    if (!rgba) {
+      return null;
+    }
+
+    return encodeRgbaToPng(rgba, width, height);
+  } finally {
+    module.FPDFBitmap_Destroy(bitmap);
+  }
+}
+
 function resolveSourceEncoding(module: PdfiumLowLevelModule, imageObject: number, bytes: Uint8Array): SupportedEncoding {
   const getFilterCount = module.FPDFImageObj_GetImageFilterCount;
   const getFilter = module.FPDFImageObj_GetImageFilter;
@@ -187,7 +367,7 @@ function resolveSourceEncoding(module: PdfiumLowLevelModule, imageObject: number
   return detectEncodingFromBytes(bytes);
 }
 
-function extractRawImagesFromPdf(module: PdfiumLowLevelModule, file: BinaryFile): ExtractedRawImage[] {
+async function extractRawImagesFromPdf(module: PdfiumLowLevelModule, file: BinaryFile): Promise<ExtractedRawImage[]> {
   const inputBytes = new Uint8Array(file.bytes);
   const filePtr = module.pdfium.wasmExports.malloc(inputBytes.length);
   if (!filePtr && inputBytes.length > 0) {
@@ -240,8 +420,14 @@ function extractRawImagesFromPdf(module: PdfiumLowLevelModule, file: BinaryFile)
               continue;
             }
 
-            const bytes = new Uint8Array(module.pdfium.HEAPU8.subarray(imagePtr, imagePtr + writtenLength));
+            let bytes = new Uint8Array(module.pdfium.HEAPU8.subarray(imagePtr, imagePtr + writtenLength));
             const encoding = resolveSourceEncoding(module, pageObject, bytes);
+            if (encoding === 'png' && !isPngContainer(bytes)) {
+              const renderedPng = await renderImageObjectAsPng(module, document, page, pageObject);
+              if (renderedPng && renderedPng.length > 0) {
+                bytes = new Uint8Array(renderedPng);
+              }
+            }
 
             images.push({
               bytes,
@@ -329,7 +515,7 @@ export function createPdfiumExtractImagesAdapter(runtime: PdfiumRuntime): Pick<P
       const loadedModule = (await runtime.load()) as unknown;
       const module = loadedModule as PdfiumLegacyExtractModule;
       const rawImages = isLowLevelModule(loadedModule)
-        ? extractRawImagesFromPdf(loadedModule, file)
+        ? await extractRawImagesFromPdf(loadedModule, file)
         : normalizeLegacyRawImages(await module.extractImages({ name: file.name, bytes: new Uint8Array(file.bytes) }));
       const base = stripExtension(file.name);
 
@@ -337,12 +523,22 @@ export function createPdfiumExtractImagesAdapter(runtime: PdfiumRuntime): Pick<P
         rawImages.map(async (rawImage, index) => {
           const decision = decideExtractionOutput(rawImage.encoding, options);
           const canConvert = typeof module.convertImage === 'function';
-          const shouldConvert = decision.mode === 'convert' && canConvert;
+          const isJpegToJpeg = decision.mode === 'convert' && rawImage.encoding === 'jpeg' && decision.outputFormat === 'jpg';
+          const shouldConvert = decision.mode === 'convert' && canConvert && !isJpegToJpeg;
           const preserveOutput = resolvePreserveOutput(rawImage.encoding);
+          const shouldRepackagePngPreserve =
+            !shouldConvert &&
+            canConvert &&
+            decision.mode === 'preserve' &&
+            rawImage.encoding === 'png' &&
+            !isPngContainer(rawImage.bytes);
 
           const bytes = shouldConvert
             ? await module.convertImage!(rawImage.bytes, decision.outputFormat, decision.quality)
-            : rawImage.bytes;
+            : shouldRepackagePngPreserve
+              ? await module.convertImage!(rawImage.bytes, 'png', 100)
+              : rawImage.bytes;
+          const converted = shouldConvert || shouldRepackagePngPreserve;
           const outputEncoding = shouldConvert ? resolveOutputEncoding(rawImage.encoding, decision) : preserveOutput.output;
           const mime = shouldConvert ? decision.mime : preserveOutput.mime;
           const extension = shouldConvert ? decision.extension : preserveOutput.extension;
@@ -350,7 +546,7 @@ export function createPdfiumExtractImagesAdapter(runtime: PdfiumRuntime): Pick<P
             source: SupportedEncoding;
             output: OutputEncoding;
           } = {
-            converted: shouldConvert,
+            converted,
             source: rawImage.encoding,
             output: outputEncoding,
             sourceEncoding: rawImage.encoding,

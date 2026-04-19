@@ -7,7 +7,7 @@ describe('a11y essentials', () => {
     render(<App />);
     expect(screen.getByRole('main')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /파일 선택/i })).toBeInTheDocument();
-    expect(screen.getByLabelText('원본 유지')).toBeInTheDocument();
-    expect(screen.getByLabelText('강제 PNG/JPG 변환')).toBeInTheDocument();
+    expect(screen.queryByLabelText('원본 유지')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('강제 PNG/JPG 변환')).not.toBeInTheDocument();
   });
 });

@@ -25,9 +25,7 @@ export default function ActionPanel({
 }: ActionPanelProps) {
   const activeJobType = useAppStore((state) => state.activeJobType);
   const status = useAppStore((state) => state.status);
-  const extractionOptions = useAppStore((state) => state.extractionOptions);
   const setJobType = useAppStore((state) => state.setJobType);
-  const setExtractionOptions = useAppStore((state) => state.setExtractionOptions);
 
   const activeIndex = useMemo(
     () => ACTION_TABS.findIndex((tab) => tab.value === activeJobType),
@@ -63,28 +61,6 @@ export default function ActionPanel({
           </>
         ) : null}
       </section>
-
-      <fieldset aria-label="이미지 추출 정책">
-        <legend>이미지 추출 정책</legend>
-        <label>
-          <input
-            type="checkbox"
-            aria-label="원본 유지"
-            checked={extractionOptions.preserveOriginal}
-            onChange={(event) => setExtractionOptions({ preserveOriginal: event.currentTarget.checked })}
-          />
-          원본 유지
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            aria-label="강제 PNG/JPG 변환"
-            checked={extractionOptions.forceConvert}
-            onChange={(event) => setExtractionOptions({ forceConvert: event.currentTarget.checked })}
-          />
-          강제 PNG/JPG 변환
-        </label>
-      </fieldset>
 
       <div className="action-buttons">
         <button type="button" onClick={onRunCurrentJob} disabled={uploadedFileCount === 0 || isRunning}>
