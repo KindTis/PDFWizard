@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import App from '../../App';
 
 describe('App flow layout', () => {
-  it('renders workflow sections and action tabs', () => {
+  it('renders upload-first canvas without inspector before file selection', () => {
     render(<App />);
 
     const stepHeader = screen.getByLabelText('작업 단계');
@@ -13,28 +13,14 @@ describe('App flow layout', () => {
 
     expect(screen.getByLabelText('썸네일 작업 영역')).toBeInTheDocument();
     expect(screen.getByLabelText('파일 업로드 영역')).toBeInTheDocument();
-
-    const actionPanel = screen.getByLabelText('작업 액션 패널');
-    expect(within(actionPanel).getByRole('tab', { name: '합치기' })).toBeInTheDocument();
-    expect(within(actionPanel).getByRole('tab', { name: '분할' })).toBeInTheDocument();
-    expect(within(actionPanel).getByRole('tab', { name: '이미지 추출' })).toBeInTheDocument();
-    expect(within(actionPanel).getByRole('tab', { name: '페이지→이미지' })).toBeInTheDocument();
-    expect(within(actionPanel).queryByLabelText('원본 유지')).not.toBeInTheDocument();
-    expect(within(actionPanel).queryByLabelText('강제 PNG/JPG 변환')).not.toBeInTheDocument();
-
-    const progressPanel = screen.getByLabelText('진행 상태 패널');
-    expect(progressPanel).toBeInTheDocument();
-    expect(within(progressPanel).getByText('원본 유지: 0')).toBeInTheDocument();
-    expect(within(progressPanel).getByText('변환: 0')).toBeInTheDocument();
-    expect(within(progressPanel).getByText('실패: 0')).toBeInTheDocument();
-    expect(screen.getByLabelText('결과 내보내기 패널')).toBeInTheDocument();
+    expect(screen.queryByLabelText('작업 선택')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('작업 인스펙터 패널')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('진행 상태 패널')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('결과 내보내기 패널')).not.toBeInTheDocument();
   });
 
-  it('enables run button after a PDF upload is registered', async () => {
+  it('shows preview first and enables inspector only after selecting a job', async () => {
     render(<App />);
-
-    const runButton = screen.getByRole('button', { name: '작업 실행' });
-    expect(runButton).toBeDisabled();
 
     const input = screen.getByLabelText('PDF 업로드 입력') as HTMLInputElement;
     const file = new File([new Uint8Array([37, 80, 68, 70])], 'sample.pdf', { type: 'application/pdf' });
@@ -42,19 +28,26 @@ describe('App flow layout', () => {
 
     await waitFor(() => {
       expect(screen.getByText('업로드된 파일: 1')).toBeInTheDocument();
-      expect(runButton).toBeEnabled();
+      expect(screen.getByLabelText('작업 선택')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText('작업 인스펙터 패널')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /합치기/ }));
+
+    await waitFor(() => {
+      const actionPanel = screen.getByLabelText('작업 인스펙터 패널');
+      expect(within(actionPanel).getByText('현재 작업: 합치기')).toBeInTheDocument();
+      expect(within(actionPanel).getByRole('button', { name: '작업 실행' })).toBeEnabled();
     });
   });
 
   it('supports split group editing and adding groups', async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole('tab', { name: '분할' }));
-    expect(screen.getByRole('heading', { name: '분할 그룹 편집' })).toBeInTheDocument();
-
     const input = screen.getByLabelText('PDF 업로드 입력') as HTMLInputElement;
     const file = new File([new Uint8Array([37, 80, 68, 70])], 'split-source.pdf', { type: 'application/pdf' });
     fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(await screen.findByRole('tab', { name: /분할/ }));
 
     await waitFor(() => {
       expect(screen.getByText('전체 페이지: 5')).toBeInTheDocument();
@@ -68,7 +61,7 @@ describe('App flow layout', () => {
 
     expect(screen.getByText('그룹 1: 1-3')).toBeInTheDocument();
 
-    const actionPanel = screen.getByLabelText('작업 액션 패널');
+    const actionPanel = screen.getByLabelText('작업 인스펙터 패널');
     expect(within(actionPanel).getByText('분할 그룹: 1개')).toBeInTheDocument();
     expect(within(actionPanel).getByText('최근 범위: 1-3')).toBeInTheDocument();
   });

@@ -4,7 +4,7 @@ import type { Artifact, JobType } from '../../worker/protocol';
 export type JobStatus = 'idle' | 'validating' | 'running' | 'paused' | 'completed' | 'partial_failed' | 'failed' | 'cancelled';
 
 type AppState = {
-  activeJobType: JobType;
+  activeJobType: JobType | null;
   status: JobStatus;
   extractionOptions: {
     preserveOriginal: boolean;
@@ -24,7 +24,7 @@ type AppState = {
   };
   artifacts: Artifact[];
   errorMessage: string | null;
-  setJobType: (jobType: JobType) => void;
+  setJobType: (jobType: JobType | null) => void;
   setStatus: (status: JobStatus) => void;
   setExtractionOptions: (patch: Partial<AppState['extractionOptions']>) => void;
   setProgress: (done: number, total: number, message: string) => void;
@@ -44,7 +44,7 @@ const initialExtractionOptions = {
 };
 
 export const useAppStore = create<AppState>((set) => ({
-  activeJobType: 'merge',
+  activeJobType: null,
   status: 'idle',
   extractionOptions: initialExtractionOptions,
   progress: initialProgress,
@@ -67,6 +67,7 @@ export const useAppStore = create<AppState>((set) => ({
   reset: () =>
     set({
       status: 'idle',
+      activeJobType: null,
       extractionOptions: initialExtractionOptions,
       progress: initialProgress,
       reportSummary: initialReportSummary,

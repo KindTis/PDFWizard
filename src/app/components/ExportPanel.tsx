@@ -4,9 +4,9 @@ import { useAppStore } from '../state/store';
 import { triggerDownload } from '../utils/download';
 import { buildZip } from '../utils/zip';
 
-function createZipName(jobType: JobType): string {
+function createZipName(jobType: JobType | null): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return `pdfwizard-${jobType}-${timestamp}.zip`;
+  return `pdfwizard-${jobType ?? 'workflow'}-${timestamp}.zip`;
 }
 
 function isExportReady(status: string): boolean {

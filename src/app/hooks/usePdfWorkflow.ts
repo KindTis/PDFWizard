@@ -389,12 +389,12 @@ function createPagesToImagesJob(file: BinaryFile, options: { forceOutputFormat: 
 }
 
 function createJobForType(
-  jobType: JobType,
+  jobType: JobType | null,
   files: BinaryFile[],
   options: { preserveOriginal: boolean; forceConvert: boolean; forceOutputFormat: 'png' | 'jpg'; quality: number },
   splitRanges: string | null | undefined,
 ): JobRequest | null {
-  if (files.length === 0) {
+  if (!jobType || files.length === 0) {
     return null;
   }
   if (jobType === 'merge') {
@@ -416,6 +416,7 @@ type UsePdfWorkflowOptions = {
 export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
   const activeJobType = useAppStore((state) => state.activeJobType);
   const extractionOptions = useAppStore((state) => state.extractionOptions);
+  const setJobType = useAppStore((state) => state.setJobType);
   const setStatus = useAppStore((state) => state.setStatus);
   const setProgress = useAppStore((state) => state.setProgress);
   const setArtifacts = useAppStore((state) => state.setArtifacts);
@@ -510,6 +511,7 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       registryRef.current.clear();
       mapped.forEach((file) => registryRef.current.upsert(file));
       setFiles(registryRef.current.list());
+      setJobType(null);
       setStatus('idle');
       setError(null);
 
@@ -584,7 +586,7 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
         }
       })();
     },
-    [setError, setStatus],
+    [setError, setJobType, setStatus],
   );
 
   const runCurrentJob = useCallback(async (): Promise<void> => {
