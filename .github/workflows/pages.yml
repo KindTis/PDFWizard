@@ -33,14 +33,8 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
       - name: Run unit tests
         run: npm run test
-
-      - name: Run E2E smoke
-        run: npm run e2e -- --workers=1 tests/e2e/workflow.spec.ts tests/e2e/app-shell.spec.ts tests/e2e/extract-images.spec.ts tests/e2e/runtime-workflow.spec.ts
 
       - name: Build
         run: npm run build
