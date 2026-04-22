@@ -93,13 +93,19 @@ const THUMBNAIL_TARGET_WIDTH = 160;
 const THUMBNAIL_EAGER_PAGE_COUNT = 12;
 
 export type ThumbnailPreview = {
+  fileId: string;
+  fileName: string;
+  fileIndex: number;
   pageNumber: number;
   imageUrl: string | null;
   status: 'pending' | 'ready' | 'failed';
 };
 
-function createPendingThumbnails(totalPages: number): ThumbnailPreview[] {
+function createPendingThumbnails(file: Pick<RegisteredPdf, 'id' | 'name'>, fileIndex: number, totalPages: number): ThumbnailPreview[] {
   return Array.from({ length: totalPages }, (_, index) => ({
+    fileId: file.id,
+    fileName: file.name,
+    fileIndex,
     pageNumber: index + 1,
     imageUrl: null,
     status: 'pending',
@@ -108,17 +114,111 @@ function createPendingThumbnails(totalPages: number): ThumbnailPreview[] {
 
 function patchThumbnail(
   thumbnails: ThumbnailPreview[],
+  fileId: string,
   pageNumber: number,
-  patch: Partial<Omit<ThumbnailPreview, 'pageNumber'>>,
+  patch: Partial<Omit<ThumbnailPreview, 'fileId' | 'fileName' | 'fileIndex' | 'pageNumber'>>,
 ): ThumbnailPreview[] {
   return thumbnails.map((thumbnail) =>
-    thumbnail.pageNumber === pageNumber
+    thumbnail.fileId === fileId && thumbnail.pageNumber === pageNumber
       ? {
           ...thumbnail,
           ...patch,
         }
       : thumbnail,
   );
+}
+
+function sortThumbnails(left: ThumbnailPreview, right: ThumbnailPreview): number {
+  if (left.fileIndex !== right.fileIndex) {
+    return left.fileIndex - right.fileIndex;
+  }
+  return left.pageNumber - right.pageNumber;
+}
+
+function hasSameFileIds(files: RegisteredPdf[], orderedFileIds: string[]): boolean {
+  if (files.length !== orderedFileIds.length) {
+    return false;
+  }
+  const fileIds = new Set(files.map((file) => file.id));
+  if (fileIds.size !== files.length) {
+    return false;
+  }
+  const orderedIdSet = new Set(orderedFileIds);
+  if (orderedIdSet.size !== orderedFileIds.length) {
+    return false;
+  }
+  return orderedFileIds.every((id) => fileIds.has(id));
+}
+
+export function reorderFilesAndThumbnails(
+  files: RegisteredPdf[],
+  thumbnails: ThumbnailPreview[],
+  orderedFileIds: string[],
+): { files: RegisteredPdf[]; thumbnails: ThumbnailPreview[] } {
+  if (!hasSameFileIds(files, orderedFileIds)) {
+    return { files, thumbnails };
+  }
+
+  const fileById = new Map(files.map((file) => [file.id, file]));
+  const reorderedFiles = orderedFileIds.map((id) => fileById.get(id)).filter((file): file is RegisteredPdf => Boolean(file));
+  if (reorderedFiles.length !== files.length) {
+    return { files, thumbnails };
+  }
+
+  const fileIndexById = new Map(reorderedFiles.map((file, index) => [file.id, index]));
+  const reorderedThumbnails = thumbnails
+    .map((thumbnail) => {
+      const nextFileIndex = fileIndexById.get(thumbnail.fileId);
+      if (typeof nextFileIndex !== 'number' || thumbnail.fileIndex === nextFileIndex) {
+        return thumbnail;
+      }
+      return {
+        ...thumbnail,
+        fileIndex: nextFileIndex,
+      };
+    })
+    .sort(sortThumbnails);
+
+  return {
+    files: reorderedFiles,
+    thumbnails: reorderedThumbnails,
+  };
+}
+
+function ensureFileThumbnails(
+  thumbnails: ThumbnailPreview[],
+  file: Pick<RegisteredPdf, 'id' | 'name'>,
+  fileIndex: number,
+  totalPages: number,
+): ThumbnailPreview[] {
+  const existingByPage = new Map<number, ThumbnailPreview>(
+    thumbnails
+      .filter((thumbnail) => thumbnail.fileId === file.id)
+      .map((thumbnail) => [thumbnail.pageNumber, thumbnail]),
+  );
+  const nextForFile = Array.from({ length: totalPages }, (_, index) => {
+    const pageNumber = index + 1;
+    const existing = existingByPage.get(pageNumber);
+    if (existing) {
+      return {
+        ...existing,
+        fileId: file.id,
+        fileName: file.name,
+        fileIndex,
+        pageNumber,
+      };
+    }
+    return {
+      fileId: file.id,
+      fileName: file.name,
+      fileIndex,
+      pageNumber,
+      imageUrl: null,
+      status: 'pending' as const,
+    };
+  });
+  const others = thumbnails.filter((thumbnail) => thumbnail.fileId !== file.id);
+  return [...others, ...nextForFile].sort(sortThumbnails);
 }
 
 function revokeObjectUrls(urls: string[]): void {
@@ -358,18 +458,15 @@ function createSplitJob(file: BinaryFile, ranges: string): JobRequest {
   };
 }
 
-function createExtractJob(
-  file: BinaryFile,
-  options: { preserveOriginal: boolean; forceConvert: boolean; forceOutputFormat: 'png' | 'jpg'; quality: number },
-): JobRequest {
+function createExtractJob(file: BinaryFile): JobRequest {
   return {
     jobId: createId(),
     type: 'extract-images',
     payload: {
       file,
-      preserveOriginal: options.preserveOriginal,
-      forceOutputFormat: options.forceConvert ? options.forceOutputFormat : undefined,
-      quality: options.quality,
+      preserveOriginal: true,
+      forceOutputFormat: undefined,
+      quality: 90,
     },
   };
 }
@@ -404,7 +501,7 @@ function createJobForType(
     return createSplitJob(files[0], splitRanges && splitRanges.trim().length > 0 ? splitRanges : '1');
   }
   if (jobType === 'extract-images') {
-    return createExtractJob(files[0], options);
+    return createExtractJob(files[0]);
   }
   return createPagesToImagesJob(files[0], options);
 }
@@ -436,6 +533,8 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
   const [thumbnails, setThumbnails] = useState<ThumbnailPreview[]>([]);
   const [isThumbnailLoading, setIsThumbnailLoading] = useState(false);
   const [thumbnailError, setThumbnailError] = useState<string | null>(null);
+  const filesRef = useRef<RegisteredPdf[]>([]);
+  const thumbnailsRef = useRef<ThumbnailPreview[]>([]);
 
   const ensureWorkerClient = useCallback((): boolean => {
     if (workerRef.current && clientRef.current) {
@@ -465,6 +564,14 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       clientRef.current = null;
     };
   }, [ensureWorkerClient]);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  useEffect(() => {
+    thumbnailsRef.current = thumbnails;
+  }, [thumbnails]);
 
   const onFilesSelected = useCallback(
     async (selected: FileList | null): Promise<void> => {
@@ -515,75 +622,93 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       setStatus('idle');
       setError(null);
 
-      const primaryFile = mapped[0];
-      if (!primaryFile) {
+      if (mapped.length === 0) {
         setIsThumbnailLoading(false);
         return;
       }
 
-      if (typeof primaryFile.pageCount === 'number' && primaryFile.pageCount > 0) {
-        setThumbnails(createPendingThumbnails(primaryFile.pageCount));
+      const pendingByMetadata = mapped
+        .map((file, fileIndex) =>
+          typeof file.pageCount === 'number' && file.pageCount > 0 ? createPendingThumbnails(file, fileIndex, file.pageCount) : [],
+        )
+        .flat();
+      if (pendingByMetadata.length > 0) {
+        setThumbnails(pendingByMetadata);
       }
 
       void (async () => {
-        let document: PdfJsRenderDocument | null = null;
-        try {
-          document = await openPdfDocument(primaryFile.bytes, {
-            standardFontDataUrl: PDFJS_STANDARD_FONT_DATA_URL,
-            cMapUrl: PDFJS_CMAP_URL,
-            cMapPacked: true,
-            useSystemFonts: true,
-            useWorkerFetch: true,
-          });
+        let hasFailure = false;
+        for (const [fileIndex, file] of mapped.entries()) {
           if (thumbnailGenerationRef.current !== generationToken) {
             return;
           }
 
-          const totalPages = Number(document.numPages);
-          if (!Number.isInteger(totalPages) || totalPages < 1) {
-            throw new Error('THUMBNAIL_PAGE_COUNT_UNAVAILABLE');
-          }
-          setThumbnails((current) => (current.length === totalPages ? current : createPendingThumbnails(totalPages)));
-
-          const eagerPageCount = Math.min(THUMBNAIL_EAGER_PAGE_COUNT, totalPages);
-          for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+          let document: PdfJsRenderDocument | null = null;
+          try {
+            document = await openPdfDocument(file.bytes, {
+              standardFontDataUrl: PDFJS_STANDARD_FONT_DATA_URL,
+              cMapUrl: PDFJS_CMAP_URL,
+              cMapPacked: true,
+              useSystemFonts: true,
+              useWorkerFetch: true,
+            });
             if (thumbnailGenerationRef.current !== generationToken) {
               return;
             }
-            if (pageNumber > eagerPageCount) {
-              await waitForThumbnailTurn();
+
+            const totalPages = Number(document.numPages);
+            if (!Number.isInteger(totalPages) || totalPages < 1) {
+              throw new Error('THUMBNAIL_PAGE_COUNT_UNAVAILABLE');
             }
+            setThumbnails((current) => ensureFileThumbnails(current, file, fileIndex, totalPages));
 
-            try {
-              const imageUrl = await renderPdfPageThumbnail(document, pageNumber);
-              if (thumbnailGenerationRef.current !== generationToken) {
-                URL.revokeObjectURL(imageUrl);
-                return;
-              }
-
-              thumbnailUrlsRef.current.push(imageUrl);
-              setThumbnails((current) => patchThumbnail(current, pageNumber, { imageUrl, status: 'ready' }));
-            } catch {
+            const eagerPageCount = Math.min(THUMBNAIL_EAGER_PAGE_COUNT, totalPages);
+            for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
               if (thumbnailGenerationRef.current !== generationToken) {
                 return;
               }
-              setThumbnails((current) => patchThumbnail(current, pageNumber, { status: 'failed' }));
-            }
-          }
+              if (pageNumber > eagerPageCount) {
+                await waitForThumbnailTurn();
+              }
 
-          if (thumbnailGenerationRef.current === generationToken) {
-            setIsThumbnailLoading(false);
+              try {
+                const imageUrl = await renderPdfPageThumbnail(document, pageNumber);
+                if (thumbnailGenerationRef.current !== generationToken) {
+                  URL.revokeObjectURL(imageUrl);
+                  return;
+                }
+
+                thumbnailUrlsRef.current.push(imageUrl);
+                setThumbnails((current) => patchThumbnail(current, file.id, pageNumber, { imageUrl, status: 'ready' }));
+              } catch {
+                hasFailure = true;
+                if (thumbnailGenerationRef.current !== generationToken) {
+                  return;
+                }
+                setThumbnails((current) => patchThumbnail(current, file.id, pageNumber, { status: 'failed' }));
+              }
+            }
+          } catch {
+            hasFailure = true;
+            if (thumbnailGenerationRef.current !== generationToken) {
+              return;
+            }
+            setThumbnails((current) =>
+              current.map((thumbnail) =>
+                thumbnail.fileId === file.id && thumbnail.status !== 'ready' ? { ...thumbnail, status: 'failed' } : thumbnail,
+              ),
+            );
+          } finally {
+            document?.cleanup?.();
+            document?.destroy?.();
           }
-        } catch {
-          if (thumbnailGenerationRef.current !== generationToken) {
-            return;
-          }
-          setThumbnailError('PDF 썸네일 미리보기를 생성하지 못했습니다.');
-          setIsThumbnailLoading(false);
-        } finally {
-          document?.cleanup?.();
-          document?.destroy?.();
         }
+
+        if (thumbnailGenerationRef.current !== generationToken) {
+          return;
+        }
+        setThumbnailError(hasFailure ? '일부 PDF 썸네일 미리보기를 생성하지 못했습니다.' : null);
+        setIsThumbnailLoading(false);
       })();
     },
     [setError, setJobType, setStatus],
@@ -657,6 +782,20 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
     setStatus('cancelled');
   }, [activeJobType, setStatus]);
 
+  const reorderUploadedFiles = useCallback((orderedFileIds: string[]): void => {
+    if (orderedFileIds.length < 2) {
+      return;
+    }
+    const currentFiles = filesRef.current;
+    if (currentFiles.length !== orderedFileIds.length || currentFiles.every((file, index) => file.id === orderedFileIds[index])) {
+      return;
+    }
+    const currentThumbnails = thumbnailsRef.current;
+    const reordered = reorderFilesAndThumbnails(currentFiles, currentThumbnails, orderedFileIds);
+    setFiles(reordered.files);
+    setThumbnails(reordered.thumbnails);
+  }, []);
+
   return useMemo(
     () => ({
       uploadedFiles: files,
@@ -666,9 +805,10 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       isThumbnailLoading,
       thumbnailError,
       onFilesSelected,
+      reorderUploadedFiles,
       runCurrentJob,
       cancelCurrentJob,
     }),
-    [cancelCurrentJob, files, isThumbnailLoading, onFilesSelected, runCurrentJob, thumbnailError, thumbnails],
+    [cancelCurrentJob, files, isThumbnailLoading, onFilesSelected, reorderUploadedFiles, runCurrentJob, thumbnailError, thumbnails],
   );
 }

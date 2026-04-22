@@ -1,7 +1,7 @@
 import './styles/app.css';
 import { useState } from 'react';
 import ActionPanel from './app/components/ActionPanel';
-import ExportPanel from './app/components/ExportPanel';
+import BottomActionBar from './app/components/BottomActionBar';
 import JobTypeSelector from './app/components/JobTypeSelector';
 import ProgressPanel from './app/components/ProgressPanel';
 import type { SplitGroupStatus } from './app/components/SplitGroupEditor';
@@ -18,36 +18,53 @@ export default function App() {
   });
   const workflow = usePdfWorkflow({ splitRanges: splitGroupStatus.mergedRange });
   const activeJobType = useAppStore((state) => state.activeJobType);
+  const primaryFile = workflow.uploadedFiles[0] ?? null;
   const showInspector = workflow.uploadedFileCount > 0 && Boolean(activeJobType);
 
   return (
     <main role="main" className="app-shell">
-      <StepHeader uploadedFileCount={workflow.uploadedFileCount} />
-      <JobTypeSelector uploadedFileCount={workflow.uploadedFileCount} />
+      <div className="top-shell">
+        <StepHeader uploadedFileCount={workflow.uploadedFileCount} />
+        <JobTypeSelector uploadedFileCount={workflow.uploadedFileCount} />
+      </div>
       <section aria-label="작업 레이아웃" className={`layout${showInspector ? ' has-inspector' : ''}`}>
         <ThumbnailWorkspace
           uploadedFileCount={workflow.uploadedFileCount}
           primaryPdfPageCount={workflow.primaryPdfPageCount}
+          primaryFileSizeBytes={primaryFile ? primaryFile.bytes.byteLength : null}
           uploadedFileNames={workflow.uploadedFiles.map((file) => file.name)}
           thumbnails={workflow.thumbnails}
           isThumbnailLoading={workflow.isThumbnailLoading}
           thumbnailError={workflow.thumbnailError}
           onFilesSelected={workflow.onFilesSelected}
-          onSplitGroupStatusChange={setSplitGroupStatus}
+          selectedRange={splitGroupStatus.latestRange}
         />
         {showInspector ? (
-          <section aria-label="제어 사이드바" className="control-sidebar">
+          <aside aria-label="제어 사이드바" className="control-sidebar">
             <ActionPanel
               uploadedFileCount={workflow.uploadedFileCount}
+              uploadedFileName={primaryFile?.name ?? null}
+              uploadedFiles={workflow.uploadedFiles}
+              primaryPdfPageCount={workflow.primaryPdfPageCount}
               splitGroupStatus={splitGroupStatus}
-              onRunCurrentJob={workflow.runCurrentJob}
-              onCancelCurrentJob={workflow.cancelCurrentJob}
+              onSplitGroupStatusChange={setSplitGroupStatus}
+              onReorderUploadedFiles={workflow.reorderUploadedFiles}
             />
-            <ProgressPanel />
-            <ExportPanel />
-          </section>
+            <ProgressPanel
+              uploadedFiles={workflow.uploadedFiles}
+              selectedRange={splitGroupStatus.latestRange}
+            />
+          </aside>
         ) : null}
       </section>
+      {showInspector ? (
+        <BottomActionBar
+          uploadedFileCount={workflow.uploadedFileCount}
+          uploadedFileName={primaryFile?.name ?? null}
+          onRunCurrentJob={workflow.runCurrentJob}
+          onCancelCurrentJob={workflow.cancelCurrentJob}
+        />
+      ) : null}
     </main>
   );
 }

@@ -6,13 +6,6 @@ export type SplitGroupStatus = {
   mergedRange: string | null;
 };
 
-type SplitGroup = {
-  id: string;
-  start: number;
-  end: number;
-  range: string;
-};
-
 type SplitGroupEditorProps = {
   uploadedFileCount: number;
   totalPages?: number | null;
@@ -41,7 +34,7 @@ function toRangeBarStyle(start: number, end: number, total: number): { left: str
   const safeTotal = Math.max(1, total);
   const left = ((start - 1) / safeTotal) * 100;
   const right = (end / safeTotal) * 100;
-  const width = Math.max((right - left) * 100, 100 / safeTotal);
+  const width = Math.max(right - left, 100 / safeTotal);
   return {
     left: `${left}%`,
     width: `${width}%`,
@@ -50,18 +43,11 @@ function toRangeBarStyle(start: number, end: number, total: number): { left: str
 
 export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStatusChange }: SplitGroupEditorProps) {
   const [draftRange, setDraftRange] = useState({ start: 1, end: 1 });
-  const [groups, setGroups] = useState<SplitGroup[]>([]);
 
   const previewPageCount = useMemo(() => getPreviewPageCount(uploadedFileCount, totalPages), [totalPages, uploadedFileCount]);
   const selectedRange = useMemo(() => toRangeToken(draftRange.start, draftRange.end), [draftRange.end, draftRange.start]);
-  const mergedRange = useMemo(
-    () => (groups.length > 0 ? groups.map((group) => group.range).join(',') : previewPageCount > 0 ? selectedRange : null),
-    [groups, previewPageCount, selectedRange],
-  );
-  const latestRange = useMemo(
-    () => (groups.length > 0 ? groups[groups.length - 1].range : previewPageCount > 0 ? selectedRange : null),
-    [groups, previewPageCount, selectedRange],
-  );
+  const latestRange = previewPageCount > 0 ? selectedRange : null;
+  const mergedRange = previewPageCount > 0 ? selectedRange : null;
   const selectedRangeBarStyle = useMemo(
     () => toRangeBarStyle(draftRange.start, draftRange.end, previewPageCount),
     [draftRange.end, draftRange.start, previewPageCount],
@@ -72,7 +58,6 @@ export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStat
       return;
     }
     setDraftRange({ start: 1, end: 1 });
-    setGroups([]);
   }, [uploadedFileCount]);
 
   useEffect(() => {
@@ -91,11 +76,11 @@ export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStat
 
   useEffect(() => {
     onStatusChange?.({
-      groupCount: groups.length,
+      groupCount: previewPageCount > 0 ? 1 : 0,
       latestRange,
       mergedRange,
     });
-  }, [groups.length, latestRange, mergedRange, onStatusChange]);
+  }, [latestRange, mergedRange, onStatusChange, previewPageCount]);
 
   const updateStart = (value: number) => {
     if (previewPageCount < 1 || !Number.isInteger(value)) {
@@ -119,115 +104,79 @@ export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStat
     });
   };
 
-  const addGroup = () => {
-    if (previewPageCount < 1) {
-      return;
-    }
-    const range = toRangeToken(draftRange.start, draftRange.end);
-    setGroups((current) => [
-      ...current,
-      {
-        id: `group-${current.length + 1}`,
-        start: draftRange.start,
-        end: draftRange.end,
-        range,
-      },
-    ]);
-  };
-
-  const removeGroup = (id: string) => {
-    setGroups((current) => current.filter((group) => group.id !== id));
-  };
-
   return (
-    <section aria-label="분할 그룹 편집기">
-      <h3>분할 그룹 편집</h3>
+    <section aria-label="분할 그룹 편집기" className="split-editor">
+      <h3>분할 범위</h3>
 
       {uploadedFileCount === 0 ? (
         <p>분할 그룹 편집을 위해 PDF를 업로드하세요.</p>
       ) : (
         <>
-          <p>전체 페이지: {previewPageCount}</p>
-          <div className="split-range-visual" aria-label="현재 선택 범위 시각화">
+          <div className="split-range-controls" aria-label="분할 페이지 입력">
             <div className="split-range-track">
+              <label>
+                <span className="sr-only">시작 페이지</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(1, previewPageCount)}
+                  value={draftRange.start}
+                  onChange={(event) => updateStart(Number(event.currentTarget.value))}
+                  aria-label="시작 페이지"
+                />
+              </label>
+              <strong>~</strong>
+              <label>
+                <span className="sr-only">끝 페이지</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(1, previewPageCount)}
+                  value={draftRange.end}
+                  onChange={(event) => updateEnd(Number(event.currentTarget.value))}
+                  aria-label="끝 페이지"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="split-range-scale" aria-hidden="true">
+            <span>1</span>
+            <span>{previewPageCount}</span>
+          </div>
+
+          <div className="split-range-visual" aria-label="현재 선택 범위 시각화">
+            <div className="split-range-visual__track">
               <div className="split-range-track__active" style={selectedRangeBarStyle} />
             </div>
-            <p>현재 선택 범위: {selectedRange}</p>
+            <div className="split-range-sliders">
+              <label>
+                <span className="sr-only">시작 슬라이더</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={Math.max(1, previewPageCount)}
+                  value={draftRange.start}
+                  onChange={(event) => updateStart(Number(event.currentTarget.value))}
+                  aria-label="시작 슬라이더"
+                />
+              </label>
+              <label>
+                <span className="sr-only">끝 슬라이더</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={Math.max(1, previewPageCount)}
+                  value={draftRange.end}
+                  onChange={(event) => updateEnd(Number(event.currentTarget.value))}
+                  aria-label="끝 슬라이더"
+                />
+              </label>
+            </div>
           </div>
-
-          <div className="split-range-controls">
-            <label>
-              시작 페이지
-              <input
-                type="number"
-                min={1}
-                max={Math.max(1, previewPageCount)}
-                value={draftRange.start}
-                onChange={(event) => updateStart(Number(event.currentTarget.value))}
-              />
-            </label>
-            <label>
-              끝 페이지
-              <input
-                type="number"
-                min={1}
-                max={Math.max(1, previewPageCount)}
-                value={draftRange.end}
-                onChange={(event) => updateEnd(Number(event.currentTarget.value))}
-              />
-            </label>
-          </div>
-
-          <div className="split-range-sliders">
-            <label>
-              시작 슬라이더
-              <input
-                type="range"
-                min={1}
-                max={Math.max(1, previewPageCount)}
-                value={draftRange.start}
-                onChange={(event) => updateStart(Number(event.currentTarget.value))}
-              />
-            </label>
-            <label>
-              끝 슬라이더
-              <input
-                type="range"
-                min={1}
-                max={Math.max(1, previewPageCount)}
-                value={draftRange.end}
-                onChange={(event) => updateEnd(Number(event.currentTarget.value))}
-              />
-            </label>
-          </div>
-
-          <button type="button" onClick={addGroup} disabled={previewPageCount < 1}>
-            범위 추가
-          </button>
-
-          <section aria-label="분할 그룹 목록">
-            {groups.length === 0 ? (
-              <p>추가된 그룹이 없습니다.</p>
-            ) : (
-              <ul className="split-group-list">
-                {groups.map((group, index) => (
-                  <li key={group.id}>
-                    <div className="split-group-item__header">
-                      <span>
-                        그룹 {index + 1}: {group.range}
-                      </span>
-                      <button type="button" onClick={() => removeGroup(group.id)}>
-                        삭제
-                      </button>
-                    </div>
-                    <div className="split-range-track split-range-track--group">
-                      <div className="split-range-track__active" style={toRangeBarStyle(group.start, group.end, previewPageCount)} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <p className="split-range-current">
+            {selectedRange} (총 {Math.max(1, draftRange.end - draftRange.start + 1)}페이지)
+          </p>
         </>
       )}
     </section>

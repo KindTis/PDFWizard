@@ -25,16 +25,21 @@ export default function StepHeader({ uploadedFileCount }: StepHeaderProps) {
     [activeJobType, artifactCount, uploadedFileCount],
   );
   return (
-    <header className="step-header" aria-label="작업 단계">
-      {STEPS.map((step, index) => (
-        <span
-          key={step}
-          className={`step-chip${index === activeStep ? ' is-active' : ''}${index < activeStep ? ' is-done' : ''}`}
-        >
-          <em>{index + 1}</em>
-          {step}
-        </span>
-      ))}
+    <header className="top-header" aria-label="작업 단계">
+      <div className="brand-block" aria-label="PDFWizard 브랜드">
+        <span className="brand-block__logo" aria-hidden="true" />
+        <strong>PDFWizard</strong>
+      </div>
+
+      <ol className="sr-only" aria-label="현재 단계 안내">
+        {STEPS.map((step, index) => (
+          <li key={step}>
+            <span>{step}</span>
+            {index === activeStep ? <span> 현재 단계</span> : null}
+            {index < activeStep ? <span> 완료 단계</span> : null}
+          </li>
+        ))}
+      </ol>
     </header>
   );
 }

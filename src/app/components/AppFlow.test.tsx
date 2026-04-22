@@ -27,7 +27,7 @@ describe('App flow layout', () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(screen.getByText('업로드된 파일: 1')).toBeInTheDocument();
+      expect(screen.getByText('sample.pdf')).toBeInTheDocument();
       expect(screen.getByLabelText('작업 선택')).toBeInTheDocument();
     });
 
@@ -36,12 +36,13 @@ describe('App flow layout', () => {
 
     await waitFor(() => {
       const actionPanel = screen.getByLabelText('작업 인스펙터 패널');
+      const actionBar = screen.getByLabelText('하단 작업 바');
       expect(within(actionPanel).getByText('현재 작업: 합치기')).toBeInTheDocument();
-      expect(within(actionPanel).getByRole('button', { name: '작업 실행' })).toBeEnabled();
+      expect(within(actionBar).getByRole('button', { name: '실행' })).toBeEnabled();
     });
   });
 
-  it('supports split group editing and adding groups', async () => {
+  it('supports split range editing and syncs it to inspector summary', async () => {
     render(<App />);
 
     const input = screen.getByLabelText('PDF 업로드 입력') as HTMLInputElement;
@@ -50,19 +51,17 @@ describe('App flow layout', () => {
     fireEvent.click(await screen.findByRole('tab', { name: /분할/ }));
 
     await waitFor(() => {
-      expect(screen.getByText('전체 페이지: 5')).toBeInTheDocument();
       expect(screen.getByLabelText('시작 페이지')).toBeInTheDocument();
       expect(screen.getByLabelText('끝 페이지')).toBeInTheDocument();
+      expect(screen.getByLabelText('시작 페이지')).toHaveAttribute('max', '5');
     });
 
     fireEvent.change(screen.getByLabelText('시작 페이지'), { target: { value: '1' } });
     fireEvent.change(screen.getByLabelText('끝 페이지'), { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: '범위 추가' }));
 
-    expect(screen.getByText('그룹 1: 1-3')).toBeInTheDocument();
+    expect(screen.getByText('1-3 (총 3페이지)')).toBeInTheDocument();
 
     const actionPanel = screen.getByLabelText('작업 인스펙터 패널');
-    expect(within(actionPanel).getByText('분할 그룹: 1개')).toBeInTheDocument();
-    expect(within(actionPanel).getByText('최근 범위: 1-3')).toBeInTheDocument();
+    expect(within(actionPanel).getByText(/페이지 1-3/)).toBeInTheDocument();
   });
 });

@@ -12,24 +12,23 @@ describe('SplitGroupEditor', () => {
 
     expect(onStatusChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        groupCount: 0,
+        groupCount: 1,
         latestRange: '1-5',
         mergedRange: '1-5',
       }),
     );
   });
 
-  it('시작/끝 범위를 시각적으로 설정해 그룹을 추가한다', () => {
+  it('시작/끝 범위를 시각적으로 설정해 단일 범위를 갱신한다', () => {
     const onStatusChange = vi.fn();
     render(<SplitGroupEditor uploadedFileCount={1} totalPages={13} onStatusChange={onStatusChange} />);
 
-    expect(screen.getByText('전체 페이지: 13')).toBeInTheDocument();
-
+    expect(screen.getByLabelText('시작 페이지')).toHaveAttribute('max', '13');
+    expect(screen.getByLabelText('끝 페이지')).toHaveAttribute('max', '13');
     fireEvent.change(screen.getByLabelText('시작 페이지'), { target: { value: '2' } });
     fireEvent.change(screen.getByLabelText('끝 페이지'), { target: { value: '6' } });
-    fireEvent.click(screen.getByRole('button', { name: '범위 추가' }));
 
-    expect(screen.getByText('그룹 1: 2-6')).toBeInTheDocument();
+    expect(screen.getByText('2-6 (총 5페이지)')).toBeInTheDocument();
     expect(onStatusChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         groupCount: 1,

@@ -24,14 +24,6 @@ export default function JobTypeSelector({ uploadedFileCount }: JobTypeSelectorPr
 
   return (
     <section className="job-type-selector" aria-label="작업 선택">
-      <div className="job-type-selector__header">
-        <h2>작업 선택</h2>
-        <p>
-          {activeJobType
-            ? '작업을 변경하면 오른쪽 인스펙터가 선택한 작업에 맞게 즉시 갱신됩니다.'
-            : '먼저 작업을 선택하면 작업 도구와 인스펙터가 표시됩니다.'}
-        </p>
-      </div>
       <div role="tablist" aria-label="PDF 작업 유형" className="job-type-selector__tabs">
         {JOB_ITEMS.map((item) => (
           <button
@@ -43,8 +35,9 @@ export default function JobTypeSelector({ uploadedFileCount }: JobTypeSelectorPr
             onClick={() => setJobType(item.value)}
             disabled={isRunning}
           >
+            <span aria-hidden="true" className="job-type-tab__dot" />
             <strong>{item.label}</strong>
-            <span>{item.description}</span>
+            <span className="sr-only">{item.description}</span>
           </button>
         ))}
       </div>
