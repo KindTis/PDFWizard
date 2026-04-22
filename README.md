@@ -48,6 +48,11 @@ npm run e2e:install
 npm run e2e
 ```
 
+## 온라인 사용 🌐
+
+로컬 실행 없이도 아래 GitHub Pages에서 바로 사용할 수 있습니다.  
+https://kindtis.github.io/PDFWizard
+
 ## 사용 방법 🧭
 
 1. 앱을 실행한 뒤 `파일 선택` 버튼으로 PDF를 업로드합니다.
