@@ -18,4 +18,6 @@ test('workflow tabs visible', async ({ page }) => {
   await page.setInputFiles('#pdf-upload-input', samplePdfPath);
 
   await expect(page.getByRole('button', { name: '범위 추가' })).toBeVisible();
+  await expect(page.locator('.thumbnail-card').first()).toBeVisible();
+  await expect(page.getByAltText('페이지 1 썸네일')).toBeVisible();
 });

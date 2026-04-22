@@ -89,42 +89,135 @@ const PDFJS_WORKER_FALLBACK_URL =
 const PDFJS_STANDARD_FONT_DATA_URL =
   'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/standard_fonts/';
 const PDFJS_CMAP_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/cmaps/';
+const THUMBNAIL_TARGET_WIDTH = 160;
+const THUMBNAIL_EAGER_PAGE_COUNT = 12;
+
+export type ThumbnailPreview = {
+  pageNumber: number;
+  imageUrl: string | null;
+  status: 'pending' | 'ready' | 'failed';
+};
+
+function createPendingThumbnails(totalPages: number): ThumbnailPreview[] {
+  return Array.from({ length: totalPages }, (_, index) => ({
+    pageNumber: index + 1,
+    imageUrl: null,
+    status: 'pending',
+  }));
+}
+
+function patchThumbnail(
+  thumbnails: ThumbnailPreview[],
+  pageNumber: number,
+  patch: Partial<Omit<ThumbnailPreview, 'pageNumber'>>,
+): ThumbnailPreview[] {
+  return thumbnails.map((thumbnail) =>
+    thumbnail.pageNumber === pageNumber
+      ? {
+          ...thumbnail,
+          ...patch,
+        }
+      : thumbnail,
+  );
+}
+
+function revokeObjectUrls(urls: string[]): void {
+  urls.forEach((url) => URL.revokeObjectURL(url));
+}
+
+type IdleAwareWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+};
+
+async function waitForThumbnailTurn(): Promise<void> {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const idleAwareWindow = window as IdleAwareWindow;
+  if (typeof idleAwareWindow.requestIdleCallback === 'function') {
+    await new Promise<void>((resolve) => {
+      idleAwareWindow.requestIdleCallback?.(() => resolve(), { timeout: 120 });
+    });
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 32);
+  });
+}
+
+async function renderPdfPageThumbnail(document: PdfJsRenderDocument, pageNumber: number): Promise<string> {
+  const page = await document.getPage(pageNumber);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = Math.max(0.12, Math.min(1, THUMBNAIL_TARGET_WIDTH / Math.max(1, baseViewport.width)));
+  const viewport = page.getViewport({ scale });
+  const canvas = window.document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('CANVAS_CONTEXT_UNAVAILABLE');
+  }
+
+  await page.render({ canvasContext: context, viewport }).promise;
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, 'image/jpeg', 0.72);
+  });
+  if (!blob) {
+    throw new Error('THUMBNAIL_ENCODE_UNAVAILABLE');
+  }
+
+  return URL.createObjectURL(blob);
+}
+
+async function loadPdfJsModule(): Promise<PdfJsPageCountModule> {
+  const pdfjs = (await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as PdfJsPageCountModule;
+  if (pdfjs.GlobalWorkerOptions && !pdfjs.GlobalWorkerOptions.workerSrc) {
+    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_FALLBACK_URL;
+  }
+  return pdfjs;
+}
+
+async function openPdfDocument(
+  bytes: ArrayBuffer,
+  params: Omit<PdfJsDocumentInitParams, 'data' | 'disableWorker'> = {},
+): Promise<PdfJsRenderDocument> {
+  const pdfjs = await loadPdfJsModule();
+  const attempts: Array<{ disableWorker?: boolean }> = [{}, { disableWorker: true }];
+  let lastError: unknown = null;
+
+  for (const attempt of attempts) {
+    try {
+      return await pdfjs
+        .getDocument({
+          data: new Uint8Array(bytes.slice(0)),
+          ...params,
+          disableWorker: attempt.disableWorker,
+        })
+        .promise;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('PDF_OPEN_FAILED');
+}
 
 async function readPdfPageCount(bytes: ArrayBuffer): Promise<number | undefined> {
   try {
-    const pdfjs = (await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as PdfJsPageCountModule;
-    if (pdfjs.GlobalWorkerOptions && !pdfjs.GlobalWorkerOptions.workerSrc) {
-      pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_FALLBACK_URL;
-    }
-
-    const attempts: Array<{ disableWorker?: boolean }> = [{}, { disableWorker: true }];
-    let lastError: unknown = null;
-
-    for (const attempt of attempts) {
-      try {
-        const document = await pdfjs
-          .getDocument({
-            data: new Uint8Array(bytes.slice(0)),
-            disableWorker: attempt.disableWorker,
-          })
-          .promise;
-        try {
-          const pageCount = Number(document.numPages);
-          if (!Number.isInteger(pageCount) || pageCount < 1) {
-            return undefined;
-          }
-          return pageCount;
-        } finally {
-          document.cleanup?.();
-          document.destroy?.();
-        }
-      } catch (error) {
-        lastError = error;
+    const document = await openPdfDocument(bytes);
+    try {
+      const pageCount = Number(document.numPages);
+      if (!Number.isInteger(pageCount) || pageCount < 1) {
+        return undefined;
       }
+      return pageCount;
+    } finally {
+      document.cleanup?.();
+      document.destroy?.();
     }
-
-    void lastError;
-    return undefined;
   } catch {
     return undefined;
   }
@@ -171,87 +264,64 @@ async function runPagesToImagesOnMainThread(
   onProgress: (done: number, total: number, message: string) => void,
   isCancelled: () => boolean,
 ): Promise<Artifact[]> {
-  const pdfjs = (await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as PdfJsPageCountModule;
-  if (pdfjs.GlobalWorkerOptions && !pdfjs.GlobalWorkerOptions.workerSrc) {
-    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_FALLBACK_URL;
-  }
-
-  const openAttempts: Array<{ disableWorker?: boolean }> = [{}, { disableWorker: true }];
-  let lastError: unknown = null;
-
   onProgress(0, 2, 'analyzing pages');
 
-  for (const attempt of openAttempts) {
-    try {
-      const pdfDocument = await pdfjs
-        .getDocument({
-          data: new Uint8Array(request.payload.file.bytes.slice(0)),
-          disableWorker: attempt.disableWorker,
-          standardFontDataUrl: PDFJS_STANDARD_FONT_DATA_URL,
-          cMapUrl: PDFJS_CMAP_URL,
-          cMapPacked: true,
-          useSystemFonts: true,
-          useWorkerFetch: true,
-        })
-        .promise;
+  const pdfDocument = await openPdfDocument(request.payload.file.bytes, {
+    standardFontDataUrl: PDFJS_STANDARD_FONT_DATA_URL,
+    cMapUrl: PDFJS_CMAP_URL,
+    cMapPacked: true,
+    useSystemFonts: true,
+    useWorkerFetch: true,
+  });
 
-      try {
-        const totalPages = Number(pdfDocument.numPages);
-        if (!Number.isInteger(totalPages) || totalPages < 1) {
-          throw new Error('RENDER_FAILED');
-        }
-
-        const pages = resolvePages(request.payload.ranges, totalPages);
-        const artifacts: Artifact[] = [];
-        onProgress(1, 2, 'rendering pages');
-
-        for (const pageNumber of pages) {
-          if (isCancelled()) {
-            throw new Error('JOB_CANCELLED');
-          }
-
-          const page = await pdfDocument.getPage(pageNumber);
-          const viewport = page.getViewport({ scale: request.payload.dpi / 72 });
-          const width = Math.max(1, Math.ceil(viewport.width));
-          const height = Math.max(1, Math.ceil(viewport.height));
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-
-          const context = canvas.getContext('2d');
-          if (!context) {
-            throw new Error('CANVAS_CONTEXT_UNAVAILABLE');
-          }
-
-          await page.render({ canvasContext: context, viewport }).promise;
-          const bytes = await encodeCanvasElement(canvas, request.payload.format, request.payload.quality);
-
-          artifacts.push({
-            name: toPageFileName(request.payload.file.name, pageNumber, request.payload.format),
-            mime: toMime(request.payload.format),
-            bytes,
-          });
-        }
-
-        if (isCancelled()) {
-          throw new Error('JOB_CANCELLED');
-        }
-
-        onProgress(2, 2, 'done');
-        return artifacts;
-      } finally {
-        pdfDocument.cleanup?.();
-        pdfDocument.destroy?.();
-      }
-    } catch (error) {
-      lastError = error;
-      if (error instanceof Error && error.message === 'JOB_CANCELLED') {
-        throw error;
-      }
+  try {
+    const totalPages = Number(pdfDocument.numPages);
+    if (!Number.isInteger(totalPages) || totalPages < 1) {
+      throw new Error('RENDER_FAILED');
     }
-  }
 
-  throw lastError instanceof Error ? lastError : new Error('RENDER_FAILED');
+    const pages = resolvePages(request.payload.ranges, totalPages);
+    const artifacts: Artifact[] = [];
+    onProgress(1, 2, 'rendering pages');
+
+    for (const pageNumber of pages) {
+      if (isCancelled()) {
+        throw new Error('JOB_CANCELLED');
+      }
+
+      const page = await pdfDocument.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: request.payload.dpi / 72 });
+      const width = Math.max(1, Math.ceil(viewport.width));
+      const height = Math.max(1, Math.ceil(viewport.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('CANVAS_CONTEXT_UNAVAILABLE');
+      }
+
+      await page.render({ canvasContext: context, viewport }).promise;
+      const bytes = await encodeCanvasElement(canvas, request.payload.format, request.payload.quality);
+
+      artifacts.push({
+        name: toPageFileName(request.payload.file.name, pageNumber, request.payload.format),
+        mime: toMime(request.payload.format),
+        bytes,
+      });
+    }
+
+    if (isCancelled()) {
+      throw new Error('JOB_CANCELLED');
+    }
+
+    onProgress(2, 2, 'done');
+    return artifacts;
+  } finally {
+    pdfDocument.cleanup?.();
+    pdfDocument.destroy?.();
+  }
 }
 
 function createWorkerIfAvailable(): Worker | null {
@@ -357,8 +427,14 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
   const clientRef = useRef<ReturnType<typeof createWorkerClient> | null>(null);
   const currentJobIdRef = useRef<string | null>(null);
   const isMainThreadCancelRequestedRef = useRef(false);
+  const fileSelectionTokenRef = useRef(0);
+  const thumbnailGenerationRef = useRef(0);
+  const thumbnailUrlsRef = useRef<string[]>([]);
 
   const [files, setFiles] = useState<RegisteredPdf[]>([]);
+  const [thumbnails, setThumbnails] = useState<ThumbnailPreview[]>([]);
+  const [isThumbnailLoading, setIsThumbnailLoading] = useState(false);
+  const [thumbnailError, setThumbnailError] = useState<string | null>(null);
 
   const ensureWorkerClient = useCallback((): boolean => {
     if (workerRef.current && clientRef.current) {
@@ -380,6 +456,9 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
   useEffect(() => {
     ensureWorkerClient();
     return () => {
+      thumbnailGenerationRef.current += 1;
+      revokeObjectUrls(thumbnailUrlsRef.current);
+      thumbnailUrlsRef.current = [];
       workerRef.current?.terminate();
       workerRef.current = null;
       clientRef.current = null;
@@ -396,23 +475,114 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       if (candidates.length === 0) {
         return;
       }
-      const mapped = await Promise.all(
-        candidates.map(async (file) => {
-          const bytes = await readFileBytes(file);
-          return {
-            id: createId(),
-            name: file.name,
-            bytes,
-            pageCount: await readPdfPageCount(bytes),
-          };
-        }),
-      );
+      const selectionToken = ++fileSelectionTokenRef.current;
+      const generationToken = ++thumbnailGenerationRef.current;
+      revokeObjectUrls(thumbnailUrlsRef.current);
+      thumbnailUrlsRef.current = [];
+      setThumbnails([]);
+      setThumbnailError(null);
+      setIsThumbnailLoading(true);
+
+      let mapped: RegisteredPdf[];
+      try {
+        mapped = await Promise.all(
+          candidates.map(async (file) => {
+            const bytes = await readFileBytes(file);
+            return {
+              id: createId(),
+              name: file.name,
+              bytes,
+              pageCount: await readPdfPageCount(bytes),
+            };
+          }),
+        );
+      } catch {
+        if (fileSelectionTokenRef.current === selectionToken) {
+          setThumbnailError('PDF 파일을 읽지 못했습니다.');
+          setIsThumbnailLoading(false);
+        }
+        return;
+      }
+      if (fileSelectionTokenRef.current !== selectionToken) {
+        return;
+      }
 
       registryRef.current.clear();
       mapped.forEach((file) => registryRef.current.upsert(file));
       setFiles(registryRef.current.list());
       setStatus('idle');
       setError(null);
+
+      const primaryFile = mapped[0];
+      if (!primaryFile) {
+        setIsThumbnailLoading(false);
+        return;
+      }
+
+      if (typeof primaryFile.pageCount === 'number' && primaryFile.pageCount > 0) {
+        setThumbnails(createPendingThumbnails(primaryFile.pageCount));
+      }
+
+      void (async () => {
+        let document: PdfJsRenderDocument | null = null;
+        try {
+          document = await openPdfDocument(primaryFile.bytes, {
+            standardFontDataUrl: PDFJS_STANDARD_FONT_DATA_URL,
+            cMapUrl: PDFJS_CMAP_URL,
+            cMapPacked: true,
+            useSystemFonts: true,
+            useWorkerFetch: true,
+          });
+          if (thumbnailGenerationRef.current !== generationToken) {
+            return;
+          }
+
+          const totalPages = Number(document.numPages);
+          if (!Number.isInteger(totalPages) || totalPages < 1) {
+            throw new Error('THUMBNAIL_PAGE_COUNT_UNAVAILABLE');
+          }
+          setThumbnails((current) => (current.length === totalPages ? current : createPendingThumbnails(totalPages)));
+
+          const eagerPageCount = Math.min(THUMBNAIL_EAGER_PAGE_COUNT, totalPages);
+          for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+            if (thumbnailGenerationRef.current !== generationToken) {
+              return;
+            }
+            if (pageNumber > eagerPageCount) {
+              await waitForThumbnailTurn();
+            }
+
+            try {
+              const imageUrl = await renderPdfPageThumbnail(document, pageNumber);
+              if (thumbnailGenerationRef.current !== generationToken) {
+                URL.revokeObjectURL(imageUrl);
+                return;
+              }
+
+              thumbnailUrlsRef.current.push(imageUrl);
+              setThumbnails((current) => patchThumbnail(current, pageNumber, { imageUrl, status: 'ready' }));
+            } catch {
+              if (thumbnailGenerationRef.current !== generationToken) {
+                return;
+              }
+              setThumbnails((current) => patchThumbnail(current, pageNumber, { status: 'failed' }));
+            }
+          }
+
+          if (thumbnailGenerationRef.current === generationToken) {
+            setIsThumbnailLoading(false);
+          }
+        } catch {
+          if (thumbnailGenerationRef.current !== generationToken) {
+            return;
+          }
+          setThumbnailError('PDF 썸네일 미리보기를 생성하지 못했습니다.');
+          setIsThumbnailLoading(false);
+        } finally {
+          document?.cleanup?.();
+          document?.destroy?.();
+        }
+      })();
     },
     [setError, setStatus],
   );
@@ -490,10 +660,13 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       uploadedFiles: files,
       uploadedFileCount: files.length,
       primaryPdfPageCount: files[0]?.pageCount ?? null,
+      thumbnails,
+      isThumbnailLoading,
+      thumbnailError,
       onFilesSelected,
       runCurrentJob,
       cancelCurrentJob,
     }),
-    [cancelCurrentJob, files, onFilesSelected, runCurrentJob],
+    [cancelCurrentJob, files, isThumbnailLoading, onFilesSelected, runCurrentJob, thumbnailError, thumbnails],
   );
 }

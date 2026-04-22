@@ -175,6 +175,57 @@ body {
   margin-top: 4px;
 }
 
+.thumbnail-grid {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.thumbnail-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  padding: 8px;
+  display: grid;
+  gap: 7px;
+}
+
+.thumbnail-card__image,
+.thumbnail-card__placeholder {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 8px;
+  border: 1px solid #d7e3f2;
+  background: #edf4ff;
+}
+
+.thumbnail-card__image {
+  object-fit: cover;
+}
+
+.thumbnail-card__placeholder {
+  display: grid;
+  place-items: center;
+  color: #4f6382;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.thumbnail-card__label {
+  margin: 0;
+  color: #2f4b6d;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.thumbnail-loading-hint {
+  margin-top: 10px;
+  color: #35567c;
+}
+
 .action-buttons {
   margin-top: 12px;
   display: flex;

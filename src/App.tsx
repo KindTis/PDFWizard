@@ -24,6 +24,9 @@ export default function App() {
           uploadedFileCount={workflow.uploadedFileCount}
           primaryPdfPageCount={workflow.primaryPdfPageCount}
           uploadedFileNames={workflow.uploadedFiles.map((file) => file.name)}
+          thumbnails={workflow.thumbnails}
+          isThumbnailLoading={workflow.isThumbnailLoading}
+          thumbnailError={workflow.thumbnailError}
           onFilesSelected={workflow.onFilesSelected}
           onSplitGroupStatusChange={setSplitGroupStatus}
         />
