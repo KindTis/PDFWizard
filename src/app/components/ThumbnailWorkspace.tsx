@@ -1,5 +1,7 @@
 import UploadZone from './UploadZone';
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import type { SplitGroup } from '../../worker/protocol';
+import { getPageSplitGroupBadges } from '../../domain/crossPdfSplit';
 import { useAppStore } from '../state/store';
 import type { ThumbnailPreview } from '../hooks/usePdfWorkflow';
 
@@ -13,6 +15,7 @@ type ThumbnailWorkspaceProps = {
   thumbnailError: string | null;
   onFilesSelected: (files: FileList | null) => void | Promise<void>;
   selectedRange: string | null;
+  selectedGroups: SplitGroup[];
 };
 
 const ZOOM_MIN = 60;
@@ -81,6 +84,7 @@ export default function ThumbnailWorkspace({
   thumbnailError,
   onFilesSelected,
   selectedRange,
+  selectedGroups,
 }: ThumbnailWorkspaceProps) {
   const activeJobType = useAppStore((state) => state.activeJobType);
   const hasFiles = uploadedFileCount > 0;
@@ -167,7 +171,11 @@ export default function ThumbnailWorkspace({
                 {thumbnails.map((thumbnail, index) => {
                   const thumbnailKey = toThumbnailKey(thumbnail);
                   const isSelected = selectedThumbnailKey === thumbnailKey;
-                  const isInSelectedRange = thumbnail.fileIndex === 0 && selectedRangePages.has(thumbnail.pageNumber);
+                  const splitGroupBadges = getPageSplitGroupBadges(thumbnail.fileId, thumbnail.pageNumber, selectedGroups);
+                  const isInSelectedRange =
+                    selectedGroups.length > 0
+                      ? splitGroupBadges.length > 0
+                      : thumbnail.fileIndex === 0 && selectedRangePages.has(thumbnail.pageNumber);
                   const startsAnotherPdf =
                     shouldShowFileSeparators && (index === 0 || thumbnails[index - 1].fileId !== thumbnail.fileId);
                   return (
@@ -190,7 +198,22 @@ export default function ThumbnailWorkspace({
                             <div className="thumbnail-card__placeholder">{thumbnail.status === 'failed' ? '생성 실패' : '로딩 중'}</div>
                           )}
                           {isSelected ? <span className="thumbnail-card__check">✓</span> : null}
+                          {splitGroupBadges.length > 0 ? (
+                            <span
+                              className="thumbnail-card__group-badges"
+                              aria-label={`${thumbnail.fileName} ${thumbnail.pageNumber}페이지 분할 그룹`}
+                            >
+                              {splitGroupBadges.map((badge) => (
+                                <span key={badge.id} className="thumbnail-card__group-badge" title={badge.title}>
+                                  {badge.label}
+                                </span>
+                              ))}
+                            </span>
+                          ) : null}
                           <p className="thumbnail-card__label">{thumbnail.pageNumber}</p>
+                          {activeJobType === 'split' && uploadedFileCount > 1 ? (
+                            <p className="thumbnail-card__global-label">전체 {thumbnail.globalPageNumber}</p>
+                          ) : null}
                         </button>
                       </li>
                     </Fragment>

@@ -17,6 +17,7 @@ function createThumbnail(fileId: string, fileName: string, fileIndex: number, pa
     fileName,
     fileIndex,
     pageNumber,
+    globalPageNumber: fileIndex * 2 + pageNumber,
     imageUrl: null,
     status: 'ready',
   };
@@ -46,6 +47,6 @@ describe('reorderFilesAndThumbnails', () => {
       'a:2',
     ]);
     expect(result.thumbnails.map((thumbnail) => thumbnail.fileIndex)).toEqual([0, 0, 1, 1, 2, 2]);
+    expect(result.thumbnails.map((thumbnail) => thumbnail.globalPageNumber)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 });
-

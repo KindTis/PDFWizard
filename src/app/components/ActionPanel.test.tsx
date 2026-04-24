@@ -26,7 +26,7 @@ describe('ActionPanel merge order', () => {
         uploadedFileName="a.pdf"
         uploadedFiles={[createUploadedFile('a', 'a.pdf'), createUploadedFile('b', 'b.pdf')]}
         primaryPdfPageCount={2}
-        splitGroupStatus={{ groupCount: 0, latestRange: null, mergedRange: null }}
+        splitGroupStatus={{ groupCount: 0, latestRange: null, mergedRange: null, groups: [], previewGroups: [] }}
         onSplitGroupStatusChange={() => {}}
         onReorderUploadedFiles={vi.fn()}
       />,
@@ -45,7 +45,7 @@ describe('ActionPanel merge order', () => {
         uploadedFileName="single.pdf"
         uploadedFiles={[createUploadedFile('single', 'single.pdf')]}
         primaryPdfPageCount={2}
-        splitGroupStatus={{ groupCount: 0, latestRange: null, mergedRange: null }}
+        splitGroupStatus={{ groupCount: 0, latestRange: null, mergedRange: null, groups: [], previewGroups: [] }}
         onSplitGroupStatusChange={() => {}}
         onReorderUploadedFiles={vi.fn()}
       />,
@@ -54,4 +54,3 @@ describe('ActionPanel merge order', () => {
     expect(screen.getByText('PDF를 2개 이상 업로드하면 순서를 조정할 수 있습니다.')).toBeInTheDocument();
   });
 });
-

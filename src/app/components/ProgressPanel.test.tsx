@@ -43,5 +43,24 @@ describe('ProgressPanel summary', () => {
     expect(screen.getByText('전체 페이지')).toBeInTheDocument();
     expect(screen.getByText('11')).toBeInTheDocument();
   });
-});
 
+  it('shows all uploaded files and generated group count for cross-PDF split jobs', () => {
+    useAppStore.getState().setJobType('split');
+
+    render(
+      <ProgressPanel
+        uploadedFiles={[
+          { id: 'a', name: 'A.pdf', bytes: new ArrayBuffer(8), pageCount: 3 },
+          { id: 'b', name: 'B.pdf', bytes: new ArrayBuffer(8), pageCount: 5 },
+        ]}
+        selectedRange="1-2,3-8"
+      />,
+    );
+
+    expect(screen.getByText('원본 파일들')).toBeInTheDocument();
+    expect(screen.getByText('2개 (A.pdf, B.pdf)')).toBeInTheDocument();
+    expect(screen.getByText('예상 총 페이지')).toBeInTheDocument();
+    expect(screen.getByText('8')).toBeInTheDocument();
+    expect(screen.getByText('2개')).toBeInTheDocument();
+  });
+});

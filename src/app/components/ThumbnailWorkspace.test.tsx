@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 import ThumbnailWorkspace from './ThumbnailWorkspace';
 import type { ThumbnailPreview } from '../hooks/usePdfWorkflow';
+import { useAppStore } from '../state/store';
 
 function createThumbnail(
   overrides: Partial<ThumbnailPreview> & { pageNumber: number; fileId: string; fileName: string; fileIndex: number },
@@ -12,11 +13,18 @@ function createThumbnail(
     fileName: overrides.fileName,
     fileIndex: overrides.fileIndex,
     imageUrl: null,
+    globalPageNumber: overrides.globalPageNumber ?? overrides.fileIndex * 2 + overrides.pageNumber,
     status: 'ready',
   } as ThumbnailPreview;
 }
 
 describe('ThumbnailWorkspace', () => {
+  afterEach(() => {
+    act(() => {
+      useAppStore.getState().reset();
+    });
+  });
+
   it('does not render inactive undo, redo, or view toggle controls', () => {
     render(
       <ThumbnailWorkspace
@@ -29,6 +37,7 @@ describe('ThumbnailWorkspace', () => {
         thumbnailError={null}
         onFilesSelected={() => {}}
         selectedRange={null}
+        selectedGroups={[]}
       />,
     );
 
@@ -50,6 +59,7 @@ describe('ThumbnailWorkspace', () => {
         thumbnailError={null}
         onFilesSelected={() => {}}
         selectedRange={null}
+        selectedGroups={[]}
       />,
     );
 
@@ -94,6 +104,7 @@ describe('ThumbnailWorkspace', () => {
         thumbnailError={null}
         onFilesSelected={() => {}}
         selectedRange={null}
+        selectedGroups={[]}
       />,
     );
 
@@ -118,9 +129,96 @@ describe('ThumbnailWorkspace', () => {
         thumbnailError={null}
         onFilesSelected={() => {}}
         selectedRange={null}
+        selectedGroups={[]}
       />,
     );
 
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  });
+
+  it('keeps local page labels and shows global labels for split mode with multiple PDFs', () => {
+    act(() => {
+      useAppStore.getState().setJobType('split');
+    });
+    const thumbnails = [
+      createThumbnail({ fileId: 'a', fileName: 'first.pdf', fileIndex: 0, pageNumber: 3, globalPageNumber: 3 }),
+      createThumbnail({ fileId: 'b', fileName: 'second.pdf', fileIndex: 1, pageNumber: 1, globalPageNumber: 4 }),
+    ];
+
+    render(
+      <ThumbnailWorkspace
+        uploadedFileCount={2}
+        primaryPdfPageCount={3}
+        primaryFileSizeBytes={1024}
+        uploadedFileNames={['first.pdf', 'second.pdf']}
+        thumbnails={thumbnails}
+        isThumbnailLoading={false}
+        thumbnailError={null}
+        onFilesSelected={() => {}}
+        selectedRange="3-4"
+        selectedGroups={[
+          {
+            id: 'group-1',
+            label: 'split-part-1',
+            globalRange: '3-4',
+            segments: [
+              { fileId: 'a', startPage: 3, endPage: 3 },
+              { fileId: 'b', startPage: 1, endPage: 1 },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('전체 3')).toBeInTheDocument();
+    expect(screen.getByText('전체 4')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem').filter((item) => item.className.includes('is-in-range'))).toHaveLength(2);
+  });
+
+  it('shows split group badges on highlighted thumbnails', () => {
+    act(() => {
+      useAppStore.getState().setJobType('split');
+    });
+    const thumbnails = [
+      createThumbnail({ fileId: 'a', fileName: 'first.pdf', fileIndex: 0, pageNumber: 3, globalPageNumber: 3 }),
+      createThumbnail({ fileId: 'b', fileName: 'second.pdf', fileIndex: 1, pageNumber: 1, globalPageNumber: 4 }),
+    ];
+
+    render(
+      <ThumbnailWorkspace
+        uploadedFileCount={2}
+        primaryPdfPageCount={3}
+        primaryFileSizeBytes={1024}
+        uploadedFileNames={['first.pdf', 'second.pdf']}
+        thumbnails={thumbnails}
+        isThumbnailLoading={false}
+        thumbnailError={null}
+        onFilesSelected={() => {}}
+        selectedRange="3-4"
+        selectedGroups={[
+          {
+            id: 'group-1',
+            label: 'split-part-1',
+            globalRange: '3',
+            segments: [{ fileId: 'a', startPage: 3, endPage: 3 }],
+          },
+          {
+            id: 'group-2',
+            label: 'split-part-2',
+            globalRange: '3-4',
+            segments: [
+              { fileId: 'a', startPage: 3, endPage: 3 },
+              { fileId: 'b', startPage: 1, endPage: 1 },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByLabelText('first.pdf 3페이지 분할 그룹')).toHaveTextContent('G1');
+    expect(screen.getByLabelText('first.pdf 3페이지 분할 그룹')).toHaveTextContent('G2');
+    expect(screen.getByLabelText('second.pdf 1페이지 분할 그룹')).toHaveTextContent('G2');
   });
 });

@@ -51,15 +51,15 @@ describe('App flow layout', () => {
     fireEvent.click(await screen.findByRole('tab', { name: /분할/ }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText('시작 페이지')).toBeInTheDocument();
-      expect(screen.getByLabelText('끝 페이지')).toBeInTheDocument();
-      expect(screen.getByLabelText('시작 페이지')).toHaveAttribute('max', '5');
+      expect(screen.getByLabelText('전체 시작 페이지')).toBeInTheDocument();
+      expect(screen.getByLabelText('전체 끝 페이지')).toBeInTheDocument();
+      expect(screen.getByLabelText('전체 시작 페이지')).toHaveAttribute('max', '5');
     });
 
-    fireEvent.change(screen.getByLabelText('시작 페이지'), { target: { value: '1' } });
-    fireEvent.change(screen.getByLabelText('끝 페이지'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('전체 시작 페이지'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('전체 끝 페이지'), { target: { value: '3' } });
 
-    expect(screen.getByText('1-3 (총 3페이지)')).toBeInTheDocument();
+    expect(screen.getByText('전체 1-3 (총 3페이지)')).toBeInTheDocument();
 
     const actionPanel = screen.getByLabelText('작업 인스펙터 패널');
     expect(within(actionPanel).getByText(/페이지 1-3/)).toBeInTheDocument();

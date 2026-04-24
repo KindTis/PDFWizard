@@ -6,6 +6,7 @@ describe('EngineFacade', () => {
     const pdfium = {
       merge: vi.fn().mockResolvedValue([]),
       split: vi.fn().mockResolvedValue([]),
+      splitGroups: vi.fn().mockResolvedValue([]),
       extractImages: vi.fn().mockResolvedValue([]),
     };
     const pdfjs = {
@@ -17,15 +18,18 @@ describe('EngineFacade', () => {
 
     await facade.merge([file], {});
     await facade.split(file, '1');
+    await facade.splitGroups([file], [{ id: 'g1', label: 'split-part-1', globalRange: '1', segments: [{ fileId: 'a', startPage: 1, endPage: 1 }] }]);
 
     expect(pdfium.merge).toHaveBeenCalledOnce();
     expect(pdfium.split).toHaveBeenCalledOnce();
+    expect(pdfium.splitGroups).toHaveBeenCalledOnce();
   });
 
   it('routes extract and render to corresponding adapters', async () => {
     const pdfium = {
       merge: vi.fn().mockResolvedValue([]),
       split: vi.fn().mockResolvedValue([]),
+      splitGroups: vi.fn().mockResolvedValue([]),
       extractImages: vi.fn().mockResolvedValue([]),
     };
     const pdfjs = {

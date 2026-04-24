@@ -285,6 +285,7 @@ function createDefaultFacade(): EngineFacade {
     pdfium: {
       merge: pdfiumMergeSplit.merge,
       split: pdfiumMergeSplit.split,
+      splitGroups: pdfiumMergeSplit.splitGroups,
       extractImages: pdfiumExtract.extractImages,
     },
     pdfjs: {

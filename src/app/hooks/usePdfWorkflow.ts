@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Artifact, BinaryFile, JobReport, JobRequest, JobType, PagesToImagesRequest } from '../../worker/protocol';
+import type { Artifact, BinaryFile, JobReport, JobRequest, JobType, PagesToImagesRequest, SplitGroup } from '../../worker/protocol';
 import { parsePageRange } from '../../domain/pageRange';
+import { createSplitGroupFromGlobalRange, getGlobalPageNumber } from '../../domain/crossPdfSplit';
 import { useAppStore } from '../state/store';
 import { createFileRegistry, type RegisteredPdf } from '../state/fileRegistry';
 import {
@@ -116,16 +117,23 @@ export type ThumbnailPreview = {
   fileName: string;
   fileIndex: number;
   pageNumber: number;
+  globalPageNumber: number;
   imageUrl: string | null;
   status: 'pending' | 'ready' | 'failed';
 };
 
-function createPendingThumbnails(file: Pick<RegisteredPdf, 'id' | 'name'>, fileIndex: number, totalPages: number): ThumbnailPreview[] {
+function createPendingThumbnails(
+  file: Pick<RegisteredPdf, 'id' | 'name'>,
+  fileIndex: number,
+  totalPages: number,
+  globalStartPage: number,
+): ThumbnailPreview[] {
   return Array.from({ length: totalPages }, (_, index) => ({
     fileId: file.id,
     fileName: file.name,
     fileIndex,
     pageNumber: index + 1,
+    globalPageNumber: globalStartPage + index,
     imageUrl: null,
     status: 'pending',
   }));
@@ -135,7 +143,7 @@ function patchThumbnail(
   thumbnails: ThumbnailPreview[],
   fileId: string,
   pageNumber: number,
-  patch: Partial<Omit<ThumbnailPreview, 'fileId' | 'fileName' | 'fileIndex' | 'pageNumber'>>,
+  patch: Partial<Omit<ThumbnailPreview, 'fileId' | 'fileName' | 'fileIndex' | 'pageNumber' | 'globalPageNumber'>>,
 ): ThumbnailPreview[] {
   return thumbnails.map((thumbnail) =>
     thumbnail.fileId === fileId && thumbnail.pageNumber === pageNumber
@@ -200,8 +208,21 @@ export function reorderFilesAndThumbnails(
 
   return {
     files: reorderedFiles,
-    thumbnails: reorderedThumbnails,
+    thumbnails: assignThumbnailGlobalPageNumbers(reorderedFiles, reorderedThumbnails),
   };
+}
+
+function assignThumbnailGlobalPageNumbers(files: RegisteredPdf[], thumbnails: ThumbnailPreview[]): ThumbnailPreview[] {
+  const fileIndexById = new Map(files.map((file, index) => [file.id, index]));
+  return thumbnails
+    .map((thumbnail) => ({
+      ...thumbnail,
+      globalPageNumber:
+        getGlobalPageNumber(files, thumbnail.fileId, thumbnail.pageNumber) ??
+        thumbnail.globalPageNumber,
+      fileIndex: fileIndexById.get(thumbnail.fileId) ?? thumbnail.fileIndex,
+    }))
+    .sort(sortThumbnails);
 }
 
 function ensureFileThumbnails(
@@ -209,6 +230,7 @@ function ensureFileThumbnails(
   file: Pick<RegisteredPdf, 'id' | 'name'>,
   fileIndex: number,
   totalPages: number,
+  globalStartPage: number,
 ): ThumbnailPreview[] {
   const existingByPage = new Map<number, ThumbnailPreview>(
     thumbnails
@@ -225,6 +247,7 @@ function ensureFileThumbnails(
         fileName: file.name,
         fileIndex,
         pageNumber,
+        globalPageNumber: globalStartPage + index,
       };
     }
     return {
@@ -232,6 +255,7 @@ function ensureFileThumbnails(
       fileName: file.name,
       fileIndex,
       pageNumber,
+      globalPageNumber: globalStartPage + index,
       imageUrl: null,
       status: 'pending' as const,
     };
@@ -487,6 +511,18 @@ function createSplitJob(file: BinaryFile, ranges: string): JobRequest {
   };
 }
 
+function createCrossPdfSplitJob(files: BinaryFile[], groups: SplitGroup[]): JobRequest {
+  return {
+    jobId: createId(),
+    type: 'split',
+    payload: {
+      mode: 'cross-pdf',
+      files,
+      groups,
+    },
+  };
+}
+
 function createExtractJob(file: BinaryFile): JobRequest {
   return {
     jobId: createId(),
@@ -610,9 +646,10 @@ export async function runPagesToImagesBatch(
 
 function createJobForType(
   jobType: JobType | null,
-  files: BinaryFile[],
+  files: BatchSourceFile[],
   options: { preserveOriginal: boolean; forceConvert: boolean; forceOutputFormat: 'png' | 'jpg'; quality: number },
   splitRanges: string | null | undefined,
+  splitGroups: SplitGroup[] = [],
 ): JobRequest | null {
   if (!jobType || files.length === 0) {
     return null;
@@ -621,6 +658,16 @@ function createJobForType(
     return createMergeJob(files);
   }
   if (jobType === 'split') {
+    if (files.length > 1) {
+      if (splitGroups.length > 0) {
+        return createCrossPdfSplitJob(files, splitGroups);
+      }
+      const range = splitRanges && splitRanges.trim().length > 0 ? splitRanges : '1';
+      const [startToken, endToken] = range.split('-').map((value) => Number(value));
+      const start = Number.isInteger(startToken) ? startToken : 1;
+      const end = Number.isInteger(endToken) ? endToken : start;
+      return createCrossPdfSplitJob(files, [createSplitGroupFromGlobalRange(files, start, end, 1)]);
+    }
     return createSplitJob(files[0], splitRanges && splitRanges.trim().length > 0 ? splitRanges : '1');
   }
   if (jobType === 'extract-images') {
@@ -631,6 +678,7 @@ function createJobForType(
 
 type UsePdfWorkflowOptions = {
   splitRanges?: string | null;
+  splitGroups?: SplitGroup[];
 };
 
 export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
@@ -752,7 +800,9 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
 
       const pendingByMetadata = mapped
         .map((file, fileIndex) =>
-          typeof file.pageCount === 'number' && file.pageCount > 0 ? createPendingThumbnails(file, fileIndex, file.pageCount) : [],
+          typeof file.pageCount === 'number' && file.pageCount > 0
+            ? createPendingThumbnails(file, fileIndex, file.pageCount, getGlobalPageNumber(mapped, file.id, 1) ?? 1)
+            : [],
         )
         .flat();
       if (pendingByMetadata.length > 0) {
@@ -783,7 +833,9 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
             if (!Number.isInteger(totalPages) || totalPages < 1) {
               throw new Error('THUMBNAIL_PAGE_COUNT_UNAVAILABLE');
             }
-            setThumbnails((current) => ensureFileThumbnails(current, file, fileIndex, totalPages));
+            setThumbnails((current) =>
+              ensureFileThumbnails(current, file, fileIndex, totalPages, getGlobalPageNumber(mapped, file.id, 1) ?? 1),
+            );
 
             const eagerPageCount = Math.min(THUMBNAIL_EAGER_PAGE_COUNT, totalPages);
             for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
@@ -838,7 +890,7 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
   );
 
   const runCurrentJob = useCallback(async (): Promise<void> => {
-    const request = createJobForType(activeJobType, files, extractionOptions, options.splitRanges);
+    const request = createJobForType(activeJobType, files, extractionOptions, options.splitRanges, options.splitGroups);
     if (!request) {
       return;
     }
@@ -915,7 +967,19 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       currentJobIdRef.current = null;
       isMainThreadCancelRequestedRef.current = false;
     }
-  }, [activeJobType, ensureWorkerClient, extractionOptions, files, options.splitRanges, setArtifacts, setError, setProgress, setReportSummary, setStatus]);
+  }, [
+    activeJobType,
+    ensureWorkerClient,
+    extractionOptions,
+    files,
+    options.splitGroups,
+    options.splitRanges,
+    setArtifacts,
+    setError,
+    setProgress,
+    setReportSummary,
+    setStatus,
+  ]);
 
   const cancelCurrentJob = useCallback((): void => {
     if (!currentJobIdRef.current) {

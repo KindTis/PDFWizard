@@ -1,9 +1,9 @@
-import type { BinaryFile } from '../../protocol';
+import type { BinaryFile, SplitGroup, SplitSegment } from '../../protocol';
 import type { EngineFacade } from '../engineFacade';
 import type { PdfiumRuntime } from './runtime';
 import { freeNativePointer, mallocNativePointer, readNativeBytes, writeNativeBytes } from './nativeMemory';
 
-export type PdfiumMergeSplitAdapter = Pick<EngineFacade, 'merge' | 'split'>;
+export type PdfiumMergeSplitAdapter = Pick<EngineFacade, 'merge' | 'split' | 'splitGroups'>;
 
 type PdfiumLegacyModule = {
   merge: (files: Array<{ name: string; bytes: Uint8Array }>, rangesByFile: Record<string, string>) => Promise<Uint8Array>;
@@ -48,6 +48,11 @@ function stripExtension(name: string): string {
     return name;
   }
   return name.slice(0, dotIndex);
+}
+
+function sanitizeFileBaseName(value: string): string {
+  const sanitized = stripExtension(value).trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_');
+  return sanitized.length > 0 ? sanitized : 'split-part';
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -121,6 +126,20 @@ function resolveImportRange(rawRange: string | undefined, getPageCount: () => nu
     return rawRange.trim();
   }
   return toAllRange(getPageCount());
+}
+
+function segmentToImportRange(segment: SplitSegment, getPageCount: () => number): string {
+  const pageCount = getPageCount();
+  if (
+    !Number.isInteger(segment.startPage) ||
+    !Number.isInteger(segment.endPage) ||
+    segment.startPage < 1 ||
+    segment.endPage > pageCount ||
+    segment.startPage > segment.endPage
+  ) {
+    throw new Error('OUT_OF_RANGE');
+  }
+  return segment.startPage === segment.endPage ? String(segment.startPage) : `${segment.startPage}-${segment.endPage}`;
 }
 
 function openDocumentFromBytes(module: PdfiumNativeModule, bytes: Uint8Array): LoadedDocument {
@@ -251,6 +270,53 @@ function splitWithNative(module: PdfiumNativeModule, file: BinaryFile, ranges: s
   }
 }
 
+function splitGroupsWithNative(module: PdfiumNativeModule, files: BinaryFile[], groups: SplitGroup[]): Uint8Array[] {
+  if (groups.length === 0) {
+    throw new Error('SPLIT_FAILED');
+  }
+
+  const fileById = new Map(files.map((file) => [file.id, file]));
+  const artifacts: Uint8Array[] = [];
+
+  for (const group of groups) {
+    if (group.segments.length === 0) {
+      throw new Error('SPLIT_FAILED');
+    }
+
+    const partDoc = module.FPDF_CreateNewDocument();
+    if (partDoc === 0) {
+      throw new Error('SPLIT_FAILED');
+    }
+
+    try {
+      for (const segment of group.segments) {
+        const file = fileById.get(segment.fileId);
+        if (!file) {
+          throw new Error('SPLIT_FAILED');
+        }
+
+        const source = openDocumentFromBytes(module, new Uint8Array(file.bytes));
+        try {
+          const importRange = segmentToImportRange(segment, () => module.FPDF_GetPageCount(source.doc));
+          const insertIndex = module.FPDF_GetPageCount(partDoc);
+          const imported = module.FPDF_ImportPages(partDoc, source.doc, importRange, insertIndex);
+          if (!imported) {
+            throw new Error('SPLIT_FAILED');
+          }
+        } finally {
+          source.close();
+        }
+      }
+
+      artifacts.push(saveAsCopy(module, partDoc));
+    } finally {
+      module.FPDF_CloseDocument(partDoc);
+    }
+  }
+
+  return artifacts;
+}
+
 export function createPdfiumMergeSplitAdapter(runtime: PdfiumRuntime): PdfiumMergeSplitAdapter {
   return {
     async merge(files, rangesByFile) {
@@ -283,10 +349,26 @@ export function createPdfiumMergeSplitAdapter(runtime: PdfiumRuntime): PdfiumMer
       } else {
         throw new Error('PDFIUM_RUNTIME_UNSUPPORTED');
       }
-      const baseName = stripExtension(file.name) || 'split';
+      const baseName = sanitizeFileBaseName(file.name) || 'split';
 
       return parts.map((bytes, index) => ({
         name: `${baseName}-part-${index + 1}.pdf`,
+        mime: 'application/pdf',
+        bytes,
+      }));
+    },
+
+    async splitGroups(files, groups) {
+      const loaded = await runtime.load();
+      let parts: Uint8Array[];
+      if (isPdfiumNativeModule(loaded)) {
+        parts = splitGroupsWithNative(loaded, files, groups);
+      } else {
+        throw new Error('PDFIUM_RUNTIME_UNSUPPORTED');
+      }
+
+      return parts.map((bytes, index) => ({
+        name: `${sanitizeFileBaseName(groups[index]?.label ?? `split-part-${index + 1}`)}.pdf`,
         mime: 'application/pdf',
         bytes,
       }));

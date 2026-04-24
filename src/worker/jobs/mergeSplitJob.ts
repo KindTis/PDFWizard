@@ -2,7 +2,7 @@ import type { Artifact, MergeRequest, SplitRequest, WorkerProgressEvent } from '
 import type { EngineFacade } from '../engines/engineFacade';
 
 export type MergeSplitRequest = MergeRequest | SplitRequest;
-export type MergeSplitAdapter = Pick<EngineFacade, 'merge' | 'split'>;
+export type MergeSplitAdapter = Pick<EngineFacade, 'merge' | 'split' | 'splitGroups'>;
 
 export type RunMergeSplitOptions = {
   adapter: MergeSplitAdapter;
@@ -35,7 +35,10 @@ export async function runMergeOrSplit(
   }
 
   emitProgress(0, 1, 'split:start');
-  const artifacts = await options.adapter.split(request.payload.file, request.payload.ranges);
+  const artifacts =
+    request.payload.mode === 'cross-pdf'
+      ? await options.adapter.splitGroups(request.payload.files, request.payload.groups)
+      : await options.adapter.split(request.payload.file, request.payload.ranges);
   emitProgress(1, 1, 'split:done');
   return artifacts;
 }

@@ -8,6 +8,7 @@ function createFacadeMock() {
       pdfium: {
         merge: vi.fn(),
         split: vi.fn(),
+        splitGroups: vi.fn(),
         extractImages: vi.fn(),
       },
       pdfjs: {
@@ -17,6 +18,7 @@ function createFacadeMock() {
     },
     merge: vi.fn(),
     split: vi.fn(),
+    splitGroups: vi.fn(),
     extractImages: vi.fn(),
     getPageCount: vi.fn(),
     renderPages: vi.fn(),

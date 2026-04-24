@@ -1,14 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import type { SplitGroup } from '../../worker/protocol';
+import {
+  createSplitGroupFromGlobalRange,
+  formatSplitGroupSummary,
+  getTotalPageCount,
+} from '../../domain/crossPdfSplit';
+import type { RegisteredPdf } from '../state/fileRegistry';
 
 export type SplitGroupStatus = {
   groupCount: number;
   latestRange: string | null;
   mergedRange: string | null;
+  groups: SplitGroup[];
+  previewGroups: SplitGroup[];
 };
 
 type SplitGroupEditorProps = {
-  uploadedFileCount: number;
-  totalPages?: number | null;
+  uploadedFiles: RegisteredPdf[];
   onStatusChange?: (status: SplitGroupStatus) => void;
 };
 
@@ -23,13 +31,6 @@ function toRangeToken(start: number, end: number): string {
   return `${start}-${end}`;
 }
 
-function getPreviewPageCount(uploadedFileCount: number, totalPages?: number | null): number {
-  if (Number.isInteger(totalPages) && (totalPages as number) > 0) {
-    return totalPages as number;
-  }
-  return Math.min(20, Math.max(0, uploadedFileCount * 5));
-}
-
 function toRangeBarStyle(start: number, end: number, total: number): { left: string; width: string } {
   const safeTotal = Math.max(1, total);
   const left = ((start - 1) / safeTotal) * 100;
@@ -41,24 +42,64 @@ function toRangeBarStyle(start: number, end: number, total: number): { left: str
   };
 }
 
-export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStatusChange }: SplitGroupEditorProps) {
-  const [draftRange, setDraftRange] = useState({ start: 1, end: 1 });
+function toHandleStyle(pageNumber: number, total: number): { left: string } {
+  if (total <= 1) {
+    return { left: '0%' };
+  }
+  return { left: `${((pageNumber - 1) / (total - 1)) * 100}%` };
+}
 
-  const previewPageCount = useMemo(() => getPreviewPageCount(uploadedFileCount, totalPages), [totalPages, uploadedFileCount]);
+function countGroupPages(group: SplitGroup): number {
+  return group.segments.reduce((sum, segment) => sum + segment.endPage - segment.startPage + 1, 0);
+}
+
+export default function SplitGroupEditor({ uploadedFiles, onStatusChange }: SplitGroupEditorProps) {
+  const [draftRange, setDraftRange] = useState({ start: 1, end: 1 });
+  const [groups, setGroups] = useState<SplitGroup[]>([]);
+  const [activeDragHandle, setActiveDragHandle] = useState<'start' | 'end' | null>(null);
+  const rangeTrackRef = useRef<HTMLDivElement | null>(null);
+
+  const splitSources = useMemo(
+    () =>
+      uploadedFiles.map((file) => ({
+        ...file,
+        pageCount: Number.isInteger(file.pageCount) && (file.pageCount as number) > 0 ? file.pageCount : 5,
+      })),
+    [uploadedFiles],
+  );
+  const previewPageCount = useMemo(() => getTotalPageCount(splitSources), [splitSources]);
   const selectedRange = useMemo(() => toRangeToken(draftRange.start, draftRange.end), [draftRange.end, draftRange.start]);
-  const latestRange = previewPageCount > 0 ? selectedRange : null;
-  const mergedRange = previewPageCount > 0 ? selectedRange : null;
+  const draftGroup = useMemo(() => {
+    if (previewPageCount < 1) {
+      return null;
+    }
+    try {
+      return createSplitGroupFromGlobalRange(splitSources, draftRange.start, draftRange.end, groups.length + 1);
+    } catch {
+      return null;
+    }
+  }, [draftRange.end, draftRange.start, groups.length, previewPageCount, splitSources]);
+  const effectiveGroups = useMemo(() => (groups.length > 0 ? groups : draftGroup ? [draftGroup] : []), [draftGroup, groups]);
+  const previewGroups = useMemo(
+    () => (groups.length > 0 ? [...groups, ...(draftGroup ? [draftGroup] : [])] : effectiveGroups),
+    [draftGroup, effectiveGroups, groups],
+  );
+  const latestRange = draftGroup?.globalRange ?? null;
+  const mergedRange = effectiveGroups.length > 0 ? effectiveGroups.map((group) => group.globalRange).join(',') : null;
   const selectedRangeBarStyle = useMemo(
     () => toRangeBarStyle(draftRange.start, draftRange.end, previewPageCount),
     [draftRange.end, draftRange.start, previewPageCount],
   );
+  const startHandleStyle = useMemo(() => toHandleStyle(draftRange.start, previewPageCount), [draftRange.start, previewPageCount]);
+  const endHandleStyle = useMemo(() => toHandleStyle(draftRange.end, previewPageCount), [draftRange.end, previewPageCount]);
 
   useEffect(() => {
-    if (uploadedFileCount > 0) {
+    if (uploadedFiles.length > 0) {
       return;
     }
     setDraftRange({ start: 1, end: 1 });
-  }, [uploadedFileCount]);
+    setGroups([]);
+  }, [uploadedFiles.length]);
 
   useEffect(() => {
     if (previewPageCount < 1) {
@@ -76,11 +117,13 @@ export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStat
 
   useEffect(() => {
     onStatusChange?.({
-      groupCount: previewPageCount > 0 ? 1 : 0,
+      groupCount: effectiveGroups.length,
       latestRange,
       mergedRange,
+      groups: effectiveGroups,
+      previewGroups,
     });
-  }, [latestRange, mergedRange, onStatusChange, previewPageCount]);
+  }, [effectiveGroups, latestRange, mergedRange, onStatusChange, previewGroups]);
 
   const updateStart = (value: number) => {
     if (previewPageCount < 1 || !Number.isInteger(value)) {
@@ -104,11 +147,104 @@ export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStat
     });
   };
 
+  const updateRangeFromClientX = (handle: 'start' | 'end', clientX: number) => {
+    const rect = rangeTrackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || previewPageCount < 1) {
+      return;
+    }
+    const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
+    const page = clamp(Math.round(ratio * Math.max(0, previewPageCount - 1)) + 1, 1, previewPageCount);
+    if (handle === 'start') {
+      updateStart(page);
+      return;
+    }
+    updateEnd(page);
+  };
+
+  useEffect(() => {
+    if (!activeDragHandle) {
+      return;
+    }
+
+    const onPointerMove = (event: PointerEvent) => {
+      updateRangeFromClientX(activeDragHandle, event.clientX);
+    };
+    const onPointerUp = () => {
+      setActiveDragHandle(null);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+  });
+
+  const beginHandleDrag = (handle: 'start' | 'end', event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.currentTarget.focus();
+    setActiveDragHandle(handle);
+    updateRangeFromClientX(handle, event.clientX);
+  };
+
+  const handleSliderKeyDown = (handle: 'start' | 'end', event: KeyboardEvent<HTMLDivElement>) => {
+    const currentValue = handle === 'start' ? draftRange.start : draftRange.end;
+    let nextValue: number | null = null;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+      nextValue = currentValue - 1;
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+      nextValue = currentValue + 1;
+    } else if (event.key === 'Home') {
+      nextValue = 1;
+    } else if (event.key === 'End') {
+      nextValue = previewPageCount;
+    }
+
+    if (nextValue === null) {
+      return;
+    }
+    event.preventDefault();
+    if (handle === 'start') {
+      updateStart(nextValue);
+      return;
+    }
+    updateEnd(nextValue);
+  };
+
+  const addCurrentGroup = () => {
+    if (!draftGroup) {
+      return;
+    }
+    setGroups((current) => [
+      ...current,
+      {
+        ...draftGroup,
+        id: `split-group-${current.length + 1}`,
+        label: `split-part-${current.length + 1}`,
+      },
+    ]);
+  };
+
+  const removeGroup = (groupId: string) => {
+    setGroups((current) =>
+      current
+        .filter((group) => group.id !== groupId)
+        .map((group, index) => ({
+          ...group,
+          id: `split-group-${index + 1}`,
+          label: `split-part-${index + 1}`,
+        })),
+    );
+  };
+
   return (
     <section aria-label="분할 그룹 편집기" className="split-editor">
       <h3>분할 범위</h3>
 
-      {uploadedFileCount === 0 ? (
+      {uploadedFiles.length === 0 || previewPageCount === 0 ? (
         <p>분할 그룹 편집을 위해 PDF를 업로드하세요.</p>
       ) : (
         <>
@@ -122,7 +258,7 @@ export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStat
                   max={Math.max(1, previewPageCount)}
                   value={draftRange.start}
                   onChange={(event) => updateStart(Number(event.currentTarget.value))}
-                  aria-label="시작 페이지"
+                  aria-label="전체 시작 페이지"
                 />
               </label>
               <strong>~</strong>
@@ -134,7 +270,7 @@ export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStat
                   max={Math.max(1, previewPageCount)}
                   value={draftRange.end}
                   onChange={(event) => updateEnd(Number(event.currentTarget.value))}
-                  aria-label="끝 페이지"
+                  aria-label="전체 끝 페이지"
                 />
               </label>
             </div>
@@ -146,37 +282,65 @@ export default function SplitGroupEditor({ uploadedFileCount, totalPages, onStat
           </div>
 
           <div className="split-range-visual" aria-label="현재 선택 범위 시각화">
-            <div className="split-range-visual__track">
+            <div className="split-range-visual__track" ref={rangeTrackRef}>
               <div className="split-range-track__active" style={selectedRangeBarStyle} />
             </div>
-            <div className="split-range-sliders">
-              <label>
-                <span className="sr-only">시작 슬라이더</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={Math.max(1, previewPageCount)}
-                  value={draftRange.start}
-                  onChange={(event) => updateStart(Number(event.currentTarget.value))}
-                  aria-label="시작 슬라이더"
-                />
-              </label>
-              <label>
-                <span className="sr-only">끝 슬라이더</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={Math.max(1, previewPageCount)}
-                  value={draftRange.end}
-                  onChange={(event) => updateEnd(Number(event.currentTarget.value))}
-                  aria-label="끝 슬라이더"
-                />
-              </label>
+            <div className="split-range-handles">
+              <div
+                role="slider"
+                tabIndex={0}
+                className="split-range-handle is-start"
+                style={startHandleStyle}
+                aria-label="전체 시작 슬라이더"
+                aria-valuemin={1}
+                aria-valuemax={Math.max(1, previewPageCount)}
+                aria-valuenow={draftRange.start}
+                onPointerDown={(event) => beginHandleDrag('start', event)}
+                onKeyDown={(event) => handleSliderKeyDown('start', event)}
+              >
+                <span className="split-range-handle__label">시작</span>
+                <span className="split-range-handle__thumb" aria-hidden="true" />
+              </div>
+              <div
+                role="slider"
+                tabIndex={0}
+                className="split-range-handle is-end"
+                style={endHandleStyle}
+                aria-label="전체 끝 슬라이더"
+                aria-valuemin={1}
+                aria-valuemax={Math.max(1, previewPageCount)}
+                aria-valuenow={draftRange.end}
+                onPointerDown={(event) => beginHandleDrag('end', event)}
+                onKeyDown={(event) => handleSliderKeyDown('end', event)}
+              >
+                <span className="split-range-handle__thumb" aria-hidden="true" />
+                <span className="split-range-handle__label">끝</span>
+              </div>
             </div>
           </div>
           <p className="split-range-current">
-            {selectedRange} (총 {Math.max(1, draftRange.end - draftRange.start + 1)}페이지)
+            전체 {selectedRange} (총 {Math.max(1, draftRange.end - draftRange.start + 1)}페이지)
           </p>
+          <button type="button" className="split-mode-btn" onClick={addCurrentGroup} disabled={!draftGroup}>
+            분할 그룹 추가
+          </button>
+          {groups.length > 0 ? (
+            <ul className="split-group-list" aria-label="분할 그룹 목록">
+              {groups.map((group) => (
+                <li key={group.id}>
+                  <strong>{group.label}.pdf</strong>
+                  <span>
+                    전체 {group.globalRange} · {formatSplitGroupSummary(group, splitSources)} · 총 {countGroupPages(group)}페이지
+                  </span>
+                  <button type="button" onClick={() => removeGroup(group.id)} aria-label={`${group.label} 삭제`}>
+                    삭제
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : draftGroup ? (
+            <p className="split-range-current">{formatSplitGroupSummary(draftGroup, splitSources)}</p>
+          ) : null}
         </>
       )}
     </section>

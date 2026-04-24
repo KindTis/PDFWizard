@@ -15,8 +15,10 @@ export default function App() {
     groupCount: 0,
     latestRange: null,
     mergedRange: null,
+    groups: [],
+    previewGroups: [],
   });
-  const workflow = usePdfWorkflow({ splitRanges: splitGroupStatus.mergedRange });
+  const workflow = usePdfWorkflow({ splitRanges: splitGroupStatus.mergedRange, splitGroups: splitGroupStatus.groups });
   const activeJobType = useAppStore((state) => state.activeJobType);
   const primaryFile = workflow.uploadedFiles[0] ?? null;
   const showInspector = workflow.uploadedFileCount > 0 && Boolean(activeJobType);
@@ -38,6 +40,7 @@ export default function App() {
           thumbnailError={workflow.thumbnailError}
           onFilesSelected={workflow.onFilesSelected}
           selectedRange={splitGroupStatus.latestRange}
+          selectedGroups={splitGroupStatus.previewGroups}
         />
         {showInspector ? (
           <aside aria-label="제어 사이드바" className="control-sidebar">
@@ -52,7 +55,7 @@ export default function App() {
             />
             <ProgressPanel
               uploadedFiles={workflow.uploadedFiles}
-              selectedRange={splitGroupStatus.latestRange}
+              selectedRange={splitGroupStatus.mergedRange}
             />
           </aside>
         ) : null}

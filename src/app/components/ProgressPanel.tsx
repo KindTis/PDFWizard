@@ -35,11 +35,11 @@ function formatEstimatedSize(bytes: number): string {
   return mb >= 10 ? `약 ${mb.toFixed(1)} MB` : `약 ${mb.toFixed(2)} MB`;
 }
 
-function formatSourceSummary(uploadedFiles: RegisteredPdf[], isMergeJob: boolean): string {
+function formatSourceSummary(uploadedFiles: RegisteredPdf[], shouldShowAllFiles: boolean): string {
   if (uploadedFiles.length === 0) {
     return '-';
   }
-  if (!isMergeJob) {
+  if (!shouldShowAllFiles) {
     return uploadedFiles[0].name;
   }
 
@@ -50,12 +50,12 @@ function formatSourceSummary(uploadedFiles: RegisteredPdf[], isMergeJob: boolean
   return `${uploadedFiles.length}개 (${shownNames.join(', ')}${tail})`;
 }
 
-function formatPageSummary(uploadedFiles: RegisteredPdf[], isMergeJob: boolean): string {
+function formatPageSummary(uploadedFiles: RegisteredPdf[], shouldShowAllFiles: boolean): string {
   if (uploadedFiles.length === 0) {
     return '-';
   }
 
-  if (!isMergeJob) {
+  if (!shouldShowAllFiles) {
     const firstFilePageCount = uploadedFiles[0].pageCount;
     return typeof firstFilePageCount === 'number' && firstFilePageCount > 0 ? String(firstFilePageCount) : '-';
   }
@@ -82,21 +82,22 @@ export default function ProgressPanel({ uploadedFiles, selectedRange }: Progress
   const errorMessage = useAppStore((state) => state.errorMessage);
   const activeJobType = useAppStore((state) => state.activeJobType);
   const isMergeJob = activeJobType === 'merge';
+  const shouldShowAllFiles = isMergeJob || uploadedFiles.length > 1;
   const selectedPageCount = countSelectedPages(selectedRange);
   const totalArtifactBytes = artifacts
     .filter((artifact) => artifact.name !== 'report.json')
     .reduce((sum, artifact) => sum + artifact.bytes.byteLength, 0);
-  const sourceSummary = formatSourceSummary(uploadedFiles, isMergeJob);
-  const pageSummary = formatPageSummary(uploadedFiles, isMergeJob);
-  const sourceLabel = isMergeJob ? '원본 파일들' : '원본 파일';
-  const pageLabel = isMergeJob ? '예상 총 페이지' : '전체 페이지';
+  const sourceSummary = formatSourceSummary(uploadedFiles, shouldShowAllFiles);
+  const pageSummary = formatPageSummary(uploadedFiles, shouldShowAllFiles);
+  const sourceLabel = shouldShowAllFiles ? '원본 파일들' : '원본 파일';
+  const pageLabel = shouldShowAllFiles ? '예상 총 페이지' : '전체 페이지';
   const generatedFileCount =
     artifacts.length > 0
       ? artifacts.filter((artifact) => artifact.name !== 'report.json').length
       : isMergeJob && uploadedFiles.length > 0
         ? 1
       : activeJobType === 'split' && selectedRange
-        ? 1
+        ? selectedRange.split(',').filter((token) => token.trim().length > 0).length
         : 0;
 
   return (

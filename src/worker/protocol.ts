@@ -6,6 +6,31 @@ export type BinaryFile = {
   bytes: ArrayBuffer;
 };
 
+export type SplitSegment = {
+  fileId: string;
+  startPage: number;
+  endPage: number;
+};
+
+export type SplitGroup = {
+  id: string;
+  label: string;
+  globalRange: string;
+  segments: SplitSegment[];
+};
+
+export type LegacySplitPayload = {
+  mode?: 'legacy';
+  file: BinaryFile;
+  ranges: string;
+};
+
+export type CrossPdfSplitPayload = {
+  mode: 'cross-pdf';
+  files: BinaryFile[];
+  groups: SplitGroup[];
+};
+
 export type MergeRequest = {
   jobId: string;
   type: 'merge';
@@ -18,10 +43,7 @@ export type MergeRequest = {
 export type SplitRequest = {
   jobId: string;
   type: 'split';
-  payload: {
-    file: BinaryFile;
-    ranges: string;
-  };
+  payload: LegacySplitPayload | CrossPdfSplitPayload;
 };
 
 export type ExtractImagesRequest = {

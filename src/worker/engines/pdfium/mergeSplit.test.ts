@@ -250,4 +250,100 @@ describe('createPdfiumMergeSplitAdapter', () => {
       'free:40',
     ]);
   });
+
+  it('splitGroups: 여러 PDF의 세그먼트를 그룹별 part PDF로 저장한다', async () => {
+    const heap = new Uint8Array(512);
+    let nextPtr = 64;
+    const sourceDocs = [501, 502, 503];
+    const partDocs = [601, 602];
+    const writerBytes = [new Uint8Array([7]), new Uint8Array([8, 9])];
+    const writerForDoc = new Map<number, number>();
+    const partPageCounts = new Map<number, number>([
+      [601, 0],
+      [602, 0],
+    ]);
+
+    const module = {
+      pdfium: {
+        HEAPU8: heap,
+        wasmExports: {
+          malloc: vi.fn((size: number) => {
+            const ptr = nextPtr;
+            nextPtr += size + 1;
+            return ptr;
+          }),
+          free: vi.fn(),
+        },
+      },
+      FPDF_LoadMemDocument: vi.fn(() => sourceDocs.shift() ?? 0),
+      FPDF_CreateNewDocument: vi.fn(() => partDocs.shift() ?? 0),
+      FPDF_ImportPages: vi.fn((destDoc: number, _srcDoc: number, range: string) => {
+        const [startToken, endToken] = range.split('-');
+        const importedPages = endToken ? Number(endToken) - Number(startToken) + 1 : 1;
+        partPageCounts.set(destDoc, (partPageCounts.get(destDoc) ?? 0) + importedPages);
+        return true;
+      }),
+      FPDF_GetPageCount: vi.fn((doc: number) => {
+        if (partPageCounts.has(doc)) {
+          return partPageCounts.get(doc) ?? 0;
+        }
+        if (doc === 501) return 3;
+        if (doc === 502 || doc === 503) return 5;
+        return 0;
+      }),
+      FPDF_CloseDocument: vi.fn(),
+      PDFiumExt_OpenFileWriter: vi.fn(() => 800 + writerForDoc.size + 1),
+      PDFiumExt_SaveAsCopy: vi.fn((doc: number, writer: number) => {
+        writerForDoc.set(writer, doc);
+        return 1;
+      }),
+      PDFiumExt_GetFileWriterSize: vi.fn((writer: number) => {
+        const index = writer - 801;
+        return writerBytes[index]?.length ?? 0;
+      }),
+      PDFiumExt_GetFileWriterData: vi.fn((writer: number, dataPtr: number, size: number) => {
+        const index = writer - 801;
+        const bytes = writerBytes[index] ?? new Uint8Array();
+        heap.set(bytes, dataPtr);
+        return size;
+      }),
+      PDFiumExt_CloseFileWriter: vi.fn(),
+    };
+    const runtime: PdfiumRuntime = {
+      load: vi.fn().mockResolvedValue(module as unknown as Awaited<ReturnType<PdfiumRuntime['load']>>),
+    };
+    const adapter = createPdfiumMergeSplitAdapter(runtime);
+
+    const result = await adapter.splitGroups(
+      [
+        { id: 'a', name: 'A.pdf', bytes: new Uint8Array([1]).buffer },
+        { id: 'b', name: 'B.pdf', bytes: new Uint8Array([2]).buffer },
+      ],
+      [
+        {
+          id: 'group-1',
+          label: 'split-part-1',
+          globalRange: '1-2',
+          segments: [{ fileId: 'a', startPage: 1, endPage: 2 }],
+        },
+        {
+          id: 'group-2',
+          label: 'split-part-2',
+          globalRange: '3-8',
+          segments: [
+            { fileId: 'a', startPage: 3, endPage: 3 },
+            { fileId: 'b', startPage: 1, endPage: 5 },
+          ],
+        },
+      ],
+    );
+
+    expect(module.FPDF_ImportPages).toHaveBeenNthCalledWith(1, 601, 501, '1-2', 0);
+    expect(module.FPDF_ImportPages).toHaveBeenNthCalledWith(2, 602, 502, '3', 0);
+    expect(module.FPDF_ImportPages).toHaveBeenNthCalledWith(3, 602, 503, '1-5', 1);
+    expect(result).toEqual([
+      { name: 'split-part-1.pdf', mime: 'application/pdf', bytes: new Uint8Array([7]) },
+      { name: 'split-part-2.pdf', mime: 'application/pdf', bytes: new Uint8Array([8, 9]) },
+    ]);
+  });
 });

@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities';
 import type { JobType } from '../../worker/protocol';
 import type { RegisteredPdf } from '../state/fileRegistry';
 import { useAppStore } from '../state/store';
+import { formatSplitGroupSummary } from '../../domain/crossPdfSplit';
 import SplitGroupEditor, { type SplitGroupStatus } from './SplitGroupEditor';
 
 const JOB_LABELS: Record<JobType, string> = {
@@ -77,6 +78,13 @@ function countSelectedPages(range: string | null): number {
     }, 0);
 }
 
+function countGroupPages(status: SplitGroupStatus): number {
+  return status.groups.reduce(
+    (sum, group) => sum + group.segments.reduce((groupSum, segment) => groupSum + segment.endPage - segment.startPage + 1, 0),
+    0,
+  );
+}
+
 export default function ActionPanel({
   uploadedFileCount,
   uploadedFileName,
@@ -122,8 +130,8 @@ export default function ActionPanel({
   }
 
   if (activeJobType === 'split') {
-    const selectedPages = countSelectedPages(splitGroupStatus.latestRange);
-    const generatedFileCount = splitGroupStatus.latestRange ? 1 : 0;
+    const selectedPages = splitGroupStatus.groups.length > 0 ? countGroupPages(splitGroupStatus) : countSelectedPages(splitGroupStatus.latestRange);
+    const generatedFileCount = splitGroupStatus.groupCount;
 
     return (
       <section aria-label="작업 인스펙터 패널" className="action-panel">
@@ -143,8 +151,7 @@ export default function ActionPanel({
         </section>
 
         <SplitGroupEditor
-          uploadedFileCount={uploadedFileCount}
-          totalPages={primaryPdfPageCount}
+          uploadedFiles={uploadedFiles}
           onStatusChange={onSplitGroupStatusChange}
         />
 
@@ -155,12 +162,27 @@ export default function ActionPanel({
           </header>
           <p>파일명(접미사)</p>
           <div className="filename-preview">
-            <input type="text" readOnly value={createSplitFileName(uploadedFileName)} aria-label="생성 파일 이름" />
+            <input
+              type="text"
+              readOnly
+              value={uploadedFiles.length > 1 ? 'split-part-001' : createSplitFileName(uploadedFileName)}
+              aria-label="생성 파일 이름"
+            />
             <strong>.pdf</strong>
           </div>
           <p className="inspector-card__range">
-            페이지 {splitGroupStatus.latestRange ?? '-'} {selectedPages > 0 ? `(총 ${selectedPages}페이지)` : ''}
+            전체 페이지 {splitGroupStatus.mergedRange ?? '-'} {selectedPages > 0 ? `(총 ${selectedPages}페이지)` : ''}
           </p>
+          {splitGroupStatus.groups.length > 0 ? (
+            <ul className="split-group-list" aria-label="생성될 분할 파일 목록">
+              {splitGroupStatus.groups.map((group) => (
+                <li key={group.id}>
+                  <strong>{group.label}.pdf</strong>
+                  <span>{formatSplitGroupSummary(group, uploadedFiles)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       </section>
     );

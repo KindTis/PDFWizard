@@ -1,4 +1,4 @@
-import type { Artifact, BinaryFile } from '../protocol';
+import type { Artifact, BinaryFile, SplitGroup } from '../protocol';
 
 export type ExtractionOptions = {
   preserveOriginal: boolean;
@@ -15,6 +15,7 @@ export type RenderOptions = {
 export type PdfiumAdapter = {
   merge: (files: BinaryFile[], rangesByFile: Record<string, string>) => Promise<Artifact[]>;
   split: (file: BinaryFile, ranges: string) => Promise<Artifact[]>;
+  splitGroups: (files: BinaryFile[], groups: SplitGroup[]) => Promise<Artifact[]>;
   extractImages: (file: BinaryFile, options: ExtractionOptions) => Promise<Artifact[]>;
 };
 
