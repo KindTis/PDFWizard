@@ -1,5 +1,5 @@
 import UploadZone from './UploadZone';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useAppStore } from '../state/store';
 import type { ThumbnailPreview } from '../hooks/usePdfWorkflow';
 
@@ -15,6 +15,11 @@ type ThumbnailWorkspaceProps = {
   selectedRange: string | null;
 };
 
+const ZOOM_MIN = 60;
+const ZOOM_MAX = 180;
+const ZOOM_STEP = 10;
+const THUMBNAIL_BASE_WIDTH = 170;
+
 function formatFileSize(bytes: number | null): string {
   if (!bytes || bytes < 1) {
     return '-';
@@ -24,6 +29,13 @@ function formatFileSize(bytes: number | null): string {
     return `${mb.toFixed(1)} MB`;
   }
   return `${mb.toFixed(2)} MB`;
+}
+
+function clampZoom(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 100;
+  }
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
 }
 
 function resolveSelectedPages(range: string | null, totalPages: number): Set<number> {
@@ -73,9 +85,13 @@ export default function ThumbnailWorkspace({
   const activeJobType = useAppStore((state) => state.activeJobType);
   const hasFiles = uploadedFileCount > 0;
   const [selectedThumbnailKey, setSelectedThumbnailKey] = useState<string | null>(null);
+  const [zoomPercent, setZoomPercent] = useState(100);
   const primaryTotalPages = primaryPdfPageCount ?? thumbnails.filter((thumbnail) => thumbnail.fileIndex === 0).length;
   const previewTotalPages = thumbnails.length > 0 ? thumbnails.length : primaryTotalPages;
   const selectedRangePages = useMemo(() => resolveSelectedPages(selectedRange, primaryTotalPages), [primaryTotalPages, selectedRange]);
+  const thumbnailGridStyle = {
+    '--thumbnail-card-min-width': `${Math.round((THUMBNAIL_BASE_WIDTH * zoomPercent) / 100)}px`,
+  } as CSSProperties;
   const shouldShowFileSeparators = uploadedFileCount > 1;
   const fileName =
     uploadedFileCount > 1
@@ -92,6 +108,10 @@ export default function ThumbnailWorkspace({
     }
   }, [selectedThumbnailKey, thumbnails]);
 
+  const changeZoom = (nextZoom: number) => {
+    setZoomPercent(clampZoom(nextZoom));
+  };
+
   return (
     <section aria-label="썸네일 작업 영역" className="thumbnail-workspace">
       {!hasFiles ? (
@@ -107,27 +127,33 @@ export default function ThumbnailWorkspace({
             </div>
 
             <div className="workspace-canvas-controls" aria-label="캔버스 제어">
-              <button type="button" className="canvas-icon-btn" aria-label="실행 취소">
-                ↶
-              </button>
-              <button type="button" className="canvas-icon-btn" aria-label="다시 실행">
-                ↷
-              </button>
               <div className="zoom-control">
-                <button type="button" className="canvas-icon-btn" aria-label="축소">
+                <button
+                  type="button"
+                  className="canvas-icon-btn"
+                  aria-label="축소"
+                  onClick={() => changeZoom(zoomPercent - ZOOM_STEP)}
+                  disabled={zoomPercent <= ZOOM_MIN}
+                >
                   −
                 </button>
-                <input type="range" min={60} max={180} defaultValue={100} aria-label="줌 비율" />
-                <button type="button" className="canvas-icon-btn" aria-label="확대">
+                <input
+                  type="range"
+                  min={ZOOM_MIN}
+                  max={ZOOM_MAX}
+                  step={ZOOM_STEP}
+                  value={zoomPercent}
+                  aria-label="줌 비율"
+                  onChange={(event) => changeZoom(Number(event.currentTarget.value))}
+                />
+                <button
+                  type="button"
+                  className="canvas-icon-btn"
+                  aria-label="확대"
+                  onClick={() => changeZoom(zoomPercent + ZOOM_STEP)}
+                  disabled={zoomPercent >= ZOOM_MAX}
+                >
                   +
-                </button>
-              </div>
-              <div className="view-toggle">
-                <button type="button" className="canvas-icon-btn is-active" aria-label="그리드 보기">
-                  ▦
-                </button>
-                <button type="button" className="canvas-icon-btn" aria-label="목록 보기">
-                  ☰
                 </button>
               </div>
             </div>
@@ -137,7 +163,7 @@ export default function ThumbnailWorkspace({
             {thumbnailError ? <p className="progress-error">{thumbnailError}</p> : null}
             {thumbnails.length === 0 && !thumbnailError ? <p>업로드된 PDF 미리보기를 준비 중입니다.</p> : null}
             {thumbnails.length > 0 ? (
-              <ul className="thumbnail-grid" aria-label="PDF 페이지 썸네일 목록">
+              <ul className="thumbnail-grid" aria-label="PDF 페이지 썸네일 목록" style={thumbnailGridStyle}>
                 {thumbnails.map((thumbnail, index) => {
                   const thumbnailKey = toThumbnailKey(thumbnail);
                   const isSelected = selectedThumbnailKey === thumbnailKey;
