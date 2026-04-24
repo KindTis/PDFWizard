@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Artifact, BinaryFile, JobRequest, JobType, PagesToImagesRequest } from '../../worker/protocol';
+import type { Artifact, BinaryFile, JobReport, JobRequest, JobType, PagesToImagesRequest } from '../../worker/protocol';
 import { parsePageRange } from '../../domain/pageRange';
 import { useAppStore } from '../state/store';
 import { createFileRegistry, type RegisteredPdf } from '../state/fileRegistry';
+import {
+  type BatchFailure,
+  createCombinedReportArtifact,
+  inferReportFromArtifacts,
+  scopeArtifactNamesToSource,
+  splitReportArtifact,
+} from '../utils/artifacts';
 import { createWorkerClient } from './useWorkerClient';
 
 type ReportSummary = {
@@ -83,6 +90,18 @@ type PdfJsPageCountModule = {
   };
   getDocument: (params: PdfJsDocumentInitParams) => { promise: Promise<PdfJsRenderDocument> };
 };
+
+type BatchSourceFile = BinaryFile & {
+  pageCount?: number;
+};
+
+type RunExtractImagesFile = (file: BinaryFile, fileIndex: number) => Promise<Artifact[]>;
+type RunPagesToImagesFile = (
+  request: PagesToImagesRequest,
+  file: BatchSourceFile,
+  fileIndex: number,
+  onFileProgress: (done: number, total: number, message: string) => void,
+) => Promise<Artifact[]>;
 
 const PDFJS_WORKER_FALLBACK_URL =
   'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.worker.min.mjs';
@@ -329,6 +348,14 @@ function toPageFileName(fileName: string, page: number, format: 'png' | 'jpg'): 
   return `${base}-page-${page}.${format}`;
 }
 
+function toFailureReasonCode(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  const message = String(error);
+  return message.trim().length > 0 ? message : 'JOB_FAILED';
+}
+
 function toMime(format: 'png' | 'jpg'): 'image/png' | 'image/jpeg' {
   return format === 'png' ? 'image/png' : 'image/jpeg';
 }
@@ -382,9 +409,10 @@ async function runPagesToImagesOnMainThread(
 
     const pages = resolvePages(request.payload.ranges, totalPages);
     const artifacts: Artifact[] = [];
-    onProgress(1, 2, 'rendering pages');
+    const renderTotal = Math.max(1, pages.length);
+    onProgress(0, renderTotal, 'rendering pages');
 
-    for (const pageNumber of pages) {
+    for (const [index, pageNumber] of pages.entries()) {
       if (isCancelled()) {
         throw new Error('JOB_CANCELLED');
       }
@@ -410,13 +438,14 @@ async function runPagesToImagesOnMainThread(
         mime: toMime(request.payload.format),
         bytes,
       });
+      onProgress(index + 1, renderTotal, `rendered page ${pageNumber}`);
     }
 
     if (isCancelled()) {
       throw new Error('JOB_CANCELLED');
     }
 
-    onProgress(2, 2, 'done');
+    onProgress(renderTotal, renderTotal, 'done');
     return artifacts;
   } finally {
     pdfDocument.cleanup?.();
@@ -483,6 +512,100 @@ function createPagesToImagesJob(file: BinaryFile, options: { forceOutputFormat: 
       quality: options.quality,
     },
   };
+}
+
+export async function runExtractImagesBatch(
+  files: BinaryFile[],
+  runFile: RunExtractImagesFile,
+  onProgress: (done: number, total: number, message: string) => void,
+): Promise<Artifact[]> {
+  const artifacts: Artifact[] = [];
+  const reports: JobReport[] = [];
+  const failures: BatchFailure[] = [];
+  const shouldScope = files.length > 1;
+  const batchJobId = createId();
+
+  for (const [index, file] of files.entries()) {
+    onProgress(index, files.length, `extracting images: ${file.name}`);
+    try {
+      const rawArtifacts = await runFile(file, index);
+      const { artifacts: downloadableArtifacts, report } = splitReportArtifact(rawArtifacts);
+      const sourceReport = report ?? inferReportFromArtifacts(downloadableArtifacts);
+      reports.push(sourceReport);
+      artifacts.push(...scopeArtifactNamesToSource(downloadableArtifacts, file.name, shouldScope));
+      onProgress(index + 1, files.length, `extracted images: ${file.name}`);
+    } catch (error) {
+      const reasonCode = toFailureReasonCode(error);
+      if (reasonCode === 'JOB_CANCELLED') {
+        throw error;
+      }
+      failures.push({ fileId: file.id, fileName: file.name, reasonCode });
+      onProgress(index + 1, files.length, `failed images: ${file.name}`);
+    }
+  }
+
+  if (artifacts.length === 0 && failures.length > 0) {
+    throw new Error(failures[0]?.reasonCode ?? 'JOB_FAILED');
+  }
+
+  artifacts.push(createCombinedReportArtifact(batchJobId, reports, failures));
+  return artifacts;
+}
+
+export async function runPagesToImagesBatch(
+  files: BatchSourceFile[],
+  options: { forceOutputFormat: 'png' | 'jpg'; quality: number },
+  runFile: RunPagesToImagesFile,
+  onProgress: (done: number, total: number, message: string) => void,
+): Promise<Artifact[]> {
+  const artifacts: Artifact[] = [];
+  const reports: JobReport[] = [];
+  const failures: BatchFailure[] = [];
+  const shouldScope = files.length > 1;
+  const batchJobId = createId();
+  const totalUnits = Math.max(
+    1,
+    files.reduce((sum, file) => sum + (Number.isInteger(file.pageCount) && file.pageCount ? file.pageCount : 1), 0),
+  );
+  let completedUnits = 0;
+
+  for (const [index, file] of files.entries()) {
+    const request = createPagesToImagesJob(file, options) as PagesToImagesRequest;
+    const fallbackFileUnits = Number.isInteger(file.pageCount) && file.pageCount ? file.pageCount : 1;
+
+    try {
+      const rawArtifacts = await runFile(request, file, index, (done, total, message) => {
+        const safeTotal = Math.max(1, total);
+        const fileUnits = Number.isInteger(file.pageCount) && file.pageCount ? file.pageCount : safeTotal;
+        const localUnits = Math.min(fileUnits, Math.round((Math.max(0, done) / safeTotal) * fileUnits));
+        onProgress(Math.min(totalUnits, completedUnits + localUnits), totalUnits, `${file.name}: ${message}`);
+      });
+      completedUnits += Number.isInteger(file.pageCount) && file.pageCount ? file.pageCount : Math.max(1, rawArtifacts.length);
+      artifacts.push(...scopeArtifactNamesToSource(rawArtifacts, file.name, shouldScope));
+      reports.push({
+        successCount: rawArtifacts.length,
+        convertedCount: 0,
+        failedCount: 0,
+        failedItems: [],
+      });
+      onProgress(Math.min(totalUnits, completedUnits), totalUnits, `converted pages: ${file.name}`);
+    } catch (error) {
+      const reasonCode = toFailureReasonCode(error);
+      if (reasonCode === 'JOB_CANCELLED') {
+        throw error;
+      }
+      completedUnits += fallbackFileUnits;
+      failures.push({ fileId: file.id, fileName: file.name, reasonCode });
+      onProgress(Math.min(totalUnits, completedUnits), totalUnits, `failed pages: ${file.name}`);
+    }
+  }
+
+  if (artifacts.length === 0 && failures.length > 0) {
+    throw new Error(failures[0]?.reasonCode ?? 'JOB_FAILED');
+  }
+
+  artifacts.push(createCombinedReportArtifact(batchJobId, reports, failures));
+  return artifacts;
 }
 
 function createJobForType(
@@ -730,11 +853,41 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
     try {
       let artifacts: Artifact[];
 
-      if (request.type === 'pages-to-images') {
+      if (request.type === 'pages-to-images' && files.length > 1) {
+        currentJobIdRef.current = createId();
+        artifacts = await runPagesToImagesBatch(
+          files,
+          extractionOptions,
+          async (fileRequest, _file, _fileIndex, onFileProgress) => {
+            currentJobIdRef.current = fileRequest.jobId;
+            return runPagesToImagesOnMainThread(
+              fileRequest,
+              (done, total, message) => onFileProgress(done, total, message),
+              () => isMainThreadCancelRequestedRef.current,
+            );
+          },
+          (done, total, message) => setProgress(done, total, message),
+        );
+      } else if (request.type === 'pages-to-images') {
         artifacts = await runPagesToImagesOnMainThread(
           request,
           (done, total, message) => setProgress(done, total, message),
           () => isMainThreadCancelRequestedRef.current,
+        );
+      } else if (request.type === 'extract-images' && files.length > 1) {
+        if (!ensureWorkerClient() || !clientRef.current || !workerRef.current) {
+          throw new Error('WORKER_UNAVAILABLE');
+        }
+        artifacts = await runExtractImagesBatch(
+          files,
+          async (file, fileIndex) => {
+            const fileRequest = createExtractJob(file);
+            currentJobIdRef.current = fileRequest.jobId;
+            return clientRef.current!.request(fileRequest, {
+              onProgress: (event) => setProgress(fileIndex, files.length, `${file.name}: ${event.message}`),
+            });
+          },
+          (done, total, message) => setProgress(done, total, message),
         );
       } else {
         if (!ensureWorkerClient() || !clientRef.current || !workerRef.current) {

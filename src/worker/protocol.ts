@@ -61,6 +61,8 @@ export type Artifact = {
 };
 
 export type FailedItem = {
+  fileId?: string;
+  fileName?: string;
   page?: number;
   objectId?: string;
   sourceEncoding?: 'jpeg' | 'png' | 'jpx' | 'jbig2' | 'ccitt';

@@ -194,12 +194,12 @@ export default function ActionPanel({
         ) : null}
 
         {activeJobType === 'extract-images' ? (
-          <p>이미지 추출은 기본 옵션(원본 인코딩 우선, 변환 해제)으로 자동 처리됩니다.</p>
+          <p>업로드된 모든 PDF에서 이미지를 추출하며 기본 옵션(원본 인코딩 우선, 변환 해제)으로 자동 처리됩니다.</p>
         ) : null}
 
         {activeJobType === 'pages-to-images' ? (
           <fieldset className="inspector-fieldset">
-            <legend>페이지 이미지 변환 옵션</legend>
+            <legend>업로드된 모든 PDF의 페이지 이미지 변환 옵션</legend>
             <label>
               출력 포맷
               <select
