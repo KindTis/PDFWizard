@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from '../state/store';
 import JobTypeSelector from './JobTypeSelector';
@@ -69,5 +69,35 @@ describe('JobTypeSelector', () => {
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(useAppStore.getState().activeJobType).toBe('split');
+  });
+
+  it('renders the liquid command rail layer and semantic glyphs instead of decorative dots', () => {
+    useAppStore.setState({ activeJobType: 'merge' });
+
+    const { container } = render(<JobTypeSelector uploadedFileCount={1} />);
+    const tabList = screen.getByRole('tablist', { name: 'PDF 작업 유형' });
+
+    expect(tabList).toHaveAttribute('data-active-index', '0');
+    expect(tabList).toHaveAttribute('data-tab-count', '4');
+    expect(container.querySelector('.job-type-selector__liquid-plate')).toBeInTheDocument();
+    expect(container.querySelector('.job-type-tab__dot')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('tab', { name: /합치기/ })).getByTestId('job-type-glyph-merge')).toBeInTheDocument();
+    expect(within(screen.getByRole('tab', { name: /분할/ })).getByTestId('job-type-glyph-split')).toBeInTheDocument();
+    expect(within(screen.getByRole('tab', { name: /이미지 추출/ })).getByTestId('job-type-glyph-extract-images')).toBeInTheDocument();
+    expect(within(screen.getByRole('tab', { name: /페이지→이미지/ })).getByTestId('job-type-glyph-pages-to-images')).toBeInTheDocument();
+  });
+
+  it('marks the liquid rail direction when switching between job tabs', () => {
+    useAppStore.setState({ activeJobType: 'merge' });
+
+    render(<JobTypeSelector uploadedFileCount={1} />);
+    const tabList = screen.getByRole('tablist', { name: 'PDF 작업 유형' });
+
+    fireEvent.click(screen.getByRole('tab', { name: /이미지 추출/ }));
+
+    expect(tabList).toHaveAttribute('data-active-index', '2');
+    expect(tabList).toHaveAttribute('data-previous-index', '0');
+    expect(tabList).toHaveAttribute('data-motion-direction', 'right');
+    expect(tabList).toHaveClass('is-switching', 'is-moving-right');
   });
 });
