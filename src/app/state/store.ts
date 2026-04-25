@@ -31,6 +31,7 @@ type AppState = {
   setReportSummary: (summary: AppState['reportSummary']) => void;
   setArtifacts: (artifacts: Artifact[]) => void;
   setError: (message: string | null) => void;
+  resetJobResult: () => void;
   reset: () => void;
 };
 
@@ -64,6 +65,14 @@ export const useAppStore = create<AppState>((set) => ({
   setReportSummary: (reportSummary) => set({ reportSummary }),
   setArtifacts: (artifacts) => set({ artifacts }),
   setError: (errorMessage) => set({ errorMessage }),
+  resetJobResult: () =>
+    set({
+      status: 'idle',
+      progress: initialProgress,
+      reportSummary: initialReportSummary,
+      artifacts: [],
+      errorMessage: null,
+    }),
   reset: () =>
     set({
       status: 'idle',

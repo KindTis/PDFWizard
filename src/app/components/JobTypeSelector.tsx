@@ -1,5 +1,6 @@
 import type { JobType } from '../../worker/protocol';
 import { useAppStore } from '../state/store';
+import { getDownloadableArtifacts } from '../utils/exportArtifacts';
 
 const JOB_ITEMS: Array<{ label: string; value: JobType; description: string }> = [
   { label: '합치기', value: 'merge', description: '여러 PDF를 하나의 파일로 병합합니다.' },
@@ -12,11 +13,37 @@ type JobTypeSelectorProps = {
   uploadedFileCount: number;
 };
 
+const RESET_RESULT_CONFIRM_MESSAGE =
+  '이전 작업 결과가 초기화됩니다. 다운로드하지 않은 파일은 다시 받을 수 없습니다. 계속 이동할까요?';
+
+function isExportReady(status: string): boolean {
+  return status === 'completed' || status === 'partial_failed';
+}
+
 export default function JobTypeSelector({ uploadedFileCount }: JobTypeSelectorProps) {
   const activeJobType = useAppStore((state) => state.activeJobType);
   const setJobType = useAppStore((state) => state.setJobType);
+  const resetJobResult = useAppStore((state) => state.resetJobResult);
   const status = useAppStore((state) => state.status);
+  const artifacts = useAppStore((state) => state.artifacts);
   const isRunning = status === 'running';
+
+  const onSelectJobType = (jobType: JobType): void => {
+    if (activeJobType === jobType) {
+      return;
+    }
+
+    const hasCompletedResult = isExportReady(status) && getDownloadableArtifacts(artifacts).length > 0;
+    if (hasCompletedResult) {
+      const shouldSwitch = window.confirm(RESET_RESULT_CONFIRM_MESSAGE);
+      if (!shouldSwitch) {
+        return;
+      }
+      resetJobResult();
+    }
+
+    setJobType(jobType);
+  };
 
   if (uploadedFileCount === 0) {
     return null;
@@ -32,7 +59,7 @@ export default function JobTypeSelector({ uploadedFileCount }: JobTypeSelectorPr
             role="tab"
             aria-selected={activeJobType === item.value}
             className={`job-type-tab${activeJobType === item.value ? ' is-selected' : ''}`}
-            onClick={() => setJobType(item.value)}
+            onClick={() => onSelectJobType(item.value)}
             disabled={isRunning}
           >
             <span aria-hidden="true" className="job-type-tab__dot" />
