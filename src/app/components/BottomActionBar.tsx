@@ -1,8 +1,6 @@
-import { useMemo, useState } from 'react';
-import type { Artifact, JobType } from '../../worker/protocol';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../state/store';
-import { triggerDownload } from '../utils/download';
-import { buildZip } from '../utils/zip';
+import { createArtifactDownloadKey, downloadArtifacts, getDownloadableArtifacts } from '../utils/exportArtifacts';
 
 type BottomActionBarProps = {
   uploadedFileCount: number;
@@ -11,19 +9,8 @@ type BottomActionBarProps = {
   onCancelCurrentJob: () => void;
 };
 
-function createZipName(jobType: JobType | null): string {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return `pdfwizard-${jobType ?? 'workflow'}-${timestamp}.zip`;
-}
-
 function isExportReady(status: string): boolean {
   return status === 'completed' || status === 'partial_failed';
-}
-
-function createSingleArtifactBlob(artifact: Artifact): Blob {
-  const safeBytes = new Uint8Array(artifact.bytes.byteLength);
-  safeBytes.set(artifact.bytes);
-  return new Blob([safeBytes], { type: artifact.mime });
 }
 
 function toProgressPercent(done: number, total: number, status: string): number {
@@ -52,44 +39,64 @@ export default function BottomActionBar({
 
   const [isExporting, setIsExporting] = useState(false);
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
+  const autoDownloadKeyRef = useRef<string | null>(null);
 
-  const downloadableArtifacts = useMemo(
-    () => artifacts.filter((artifact) => artifact.name !== 'report.json'),
-    [artifacts],
-  );
+  const downloadableArtifacts = useMemo(() => getDownloadableArtifacts(artifacts), [artifacts]);
 
   const isRunning = status === 'running';
   const canRun = uploadedFileCount > 0 && Boolean(activeJobType) && !isRunning;
   const canCancel = isRunning;
   const canDownload = isExportReady(status) && downloadableArtifacts.length > 0 && !isExporting;
+  const downloadKey = useMemo(
+    () => (downloadableArtifacts.length > 0 ? createArtifactDownloadKey(activeJobType, downloadableArtifacts) : null),
+    [activeJobType, downloadableArtifacts],
+  );
   const progressPercent = toProgressPercent(progress.done, progress.total, status);
   const progressMessage =
     progress.message.trim().length > 0 ? progress.message : `${uploadedFileName ?? '선택한 문서'} ${isRunning ? '처리 중' : '대기 중'}`;
 
-  const onDownload = async (): Promise<void> => {
-    if (!canDownload) {
+  const startDownload = useCallback(
+    async (mode: 'auto' | 'manual'): Promise<void> => {
+      if (!isExportReady(status) || downloadableArtifacts.length === 0 || isExporting) {
+        return;
+      }
+
+      setIsExporting(true);
+      setDownloadMessage(null);
+
+      try {
+        const result = await downloadArtifacts(activeJobType, downloadableArtifacts);
+        setDownloadMessage(
+          mode === 'auto'
+            ? `${result.count}개 파일 다운로드를 시작했습니다. 시작되지 않으면 다시 다운로드를 눌러주세요.`
+            : `${result.count}개 파일 다운로드를 시작했습니다.`,
+        );
+      } catch {
+        setDownloadMessage(
+          mode === 'auto'
+            ? '자동 다운로드를 준비하지 못했습니다. 다시 다운로드를 눌러주세요.'
+            : '다운로드 준비 중 오류가 발생했습니다.',
+        );
+      } finally {
+        setIsExporting(false);
+      }
+    },
+    [activeJobType, downloadableArtifacts, isExporting, status],
+  );
+
+  useEffect(() => {
+    if (!isExportReady(status)) {
+      autoDownloadKeyRef.current = null;
       return;
     }
 
-    setIsExporting(true);
-    setDownloadMessage(null);
-
-    try {
-      if (downloadableArtifacts.length === 1) {
-        const artifact = downloadableArtifacts[0];
-        triggerDownload(createSingleArtifactBlob(artifact), artifact.name);
-      } else {
-        const zipName = createZipName(activeJobType);
-        const zipBlob = await buildZip(zipName, downloadableArtifacts);
-        triggerDownload(zipBlob, zipName);
-      }
-      setDownloadMessage(`${downloadableArtifacts.length}개 파일 다운로드를 시작했습니다.`);
-    } catch {
-      setDownloadMessage('다운로드 준비 중 오류가 발생했습니다.');
-    } finally {
-      setIsExporting(false);
+    if (!canDownload || !downloadKey || autoDownloadKeyRef.current === downloadKey) {
+      return;
     }
-  };
+
+    autoDownloadKeyRef.current = downloadKey;
+    void startDownload('auto');
+  }, [canDownload, downloadKey, startDownload, status]);
 
   return (
     <footer className="bottom-action-bar" aria-label="하단 작업 바">
@@ -110,8 +117,8 @@ export default function BottomActionBar({
         <button type="button" className="action-btn is-ghost" onClick={onCancelCurrentJob} disabled={!canCancel}>
           취소
         </button>
-        <button type="button" className="action-btn is-outline" onClick={() => void onDownload()} disabled={!canDownload}>
-          {isExporting ? '내보내는 중...' : '다운로드'}
+        <button type="button" className="action-btn is-outline" onClick={() => void startDownload('manual')} disabled={!canDownload}>
+          {isExporting ? '내보내는 중...' : isExportReady(status) ? '다시 다운로드' : '다운로드'}
         </button>
         <button type="button" className="action-btn is-primary" onClick={() => void onRunCurrentJob()} disabled={!canRun}>
           실행

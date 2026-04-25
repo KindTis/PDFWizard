@@ -1,22 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { Artifact, JobType } from '../../worker/protocol';
 import { useAppStore } from '../state/store';
-import { triggerDownload } from '../utils/download';
-import { buildZip } from '../utils/zip';
-
-function createZipName(jobType: JobType | null): string {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return `pdfwizard-${jobType ?? 'workflow'}-${timestamp}.zip`;
-}
+import { downloadArtifacts, getDownloadableArtifacts } from '../utils/exportArtifacts';
 
 function isExportReady(status: string): boolean {
   return status === 'completed' || status === 'partial_failed';
-}
-
-function createSingleArtifactBlob(artifact: Artifact): Blob {
-  const safeBytes = new Uint8Array(artifact.bytes.byteLength);
-  safeBytes.set(artifact.bytes);
-  return new Blob([safeBytes], { type: artifact.mime });
 }
 
 export default function ExportPanel() {
@@ -27,10 +14,7 @@ export default function ExportPanel() {
   const [isExporting, setIsExporting] = useState(false);
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
 
-  const downloadableArtifacts = useMemo(
-    () => artifacts.filter((artifact) => artifact.name !== 'report.json'),
-    [artifacts],
-  );
+  const downloadableArtifacts = useMemo(() => getDownloadableArtifacts(artifacts), [artifacts]);
   const canDownload = isExportReady(status) && downloadableArtifacts.length > 0 && !isExporting;
 
   const onDownload = async (): Promise<void> => {
@@ -42,15 +26,8 @@ export default function ExportPanel() {
     setDownloadMessage(null);
 
     try {
-      if (downloadableArtifacts.length === 1) {
-        const artifact = downloadableArtifacts[0];
-        triggerDownload(createSingleArtifactBlob(artifact), artifact.name);
-      } else {
-        const zipName = createZipName(activeJobType);
-        const zipBlob = await buildZip(zipName, downloadableArtifacts);
-        triggerDownload(zipBlob, zipName);
-      }
-      setDownloadMessage(`${downloadableArtifacts.length}개 파일 다운로드를 시작했습니다.`);
+      const result = await downloadArtifacts(activeJobType, downloadableArtifacts);
+      setDownloadMessage(`${result.count}개 파일 다운로드를 시작했습니다.`);
     } catch {
       setDownloadMessage('다운로드 준비 중 오류가 발생했습니다.');
     } finally {
