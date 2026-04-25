@@ -1074,9 +1074,26 @@ body {
   padding: 10px;
 }
 
+.merge-order-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .merge-order-box h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.merge-add-button {
+  border: 1px solid #ffd2c3;
+  border-radius: 10px;
+  min-height: 34px;
+  padding: 0 12px;
+  background: #fff;
+  color: var(--accent);
+  font-weight: 800;
 }
 
 .merge-order-box > p {
@@ -1105,7 +1122,7 @@ body {
   min-height: 42px;
   padding: 6px 10px;
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
 }
@@ -1144,6 +1161,16 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.merge-order-remove {
+  border: 1px solid #d9deea;
+  border-radius: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  background: #fff;
+  color: #5b667d;
+  font-weight: 700;
 }
 
 .inspector-card {
@@ -1409,6 +1436,8 @@ body {
 :root[data-theme='night'] .split-group-list button,
 :root[data-theme='night'] .merge-order-item,
 :root[data-theme='night'] .merge-order-handle,
+:root[data-theme='night'] .merge-order-remove,
+:root[data-theme='night'] .merge-add-button,
 :root[data-theme='night'] .upload-control,
 :root[data-theme='night'] .action-btn,
 :root[data-theme='night'] .filename-preview {

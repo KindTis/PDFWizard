@@ -1,6 +1,7 @@
 import { closestCenter, DndContext, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useRef } from 'react';
 import type { JobType } from '../../worker/protocol';
 import type { RegisteredPdf } from '../state/fileRegistry';
 import { useAppStore } from '../state/store';
@@ -21,6 +22,8 @@ type ActionPanelProps = {
   primaryPdfPageCount: number | null;
   splitGroupStatus: SplitGroupStatus;
   onSplitGroupStatusChange: (status: SplitGroupStatus) => void;
+  onAddUploadedFiles: (files: FileList | null) => void | Promise<void>;
+  onRemoveUploadedFile: (fileId: string) => void;
   onReorderUploadedFiles: (orderedFileIds: string[]) => void;
 };
 
@@ -28,9 +31,10 @@ type MergeOrderItemProps = {
   id: string;
   index: number;
   name: string;
+  onRemove: (id: string) => void;
 };
 
-function MergeOrderItem({ id, index, name }: MergeOrderItemProps) {
+function MergeOrderItem({ id, index, name, onRemove }: MergeOrderItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -44,6 +48,9 @@ function MergeOrderItem({ id, index, name }: MergeOrderItemProps) {
       </button>
       <span className="merge-order-index">{index + 1}</span>
       <span className="merge-order-name">{name}</span>
+      <button type="button" className="merge-order-remove" aria-label={`${name} 제거`} onClick={() => onRemove(id)}>
+        제거
+      </button>
     </li>
   );
 }
@@ -92,11 +99,14 @@ export default function ActionPanel({
   primaryPdfPageCount,
   splitGroupStatus,
   onSplitGroupStatusChange,
+  onAddUploadedFiles,
+  onRemoveUploadedFile,
   onReorderUploadedFiles,
 }: ActionPanelProps) {
   const activeJobType = useAppStore((state) => state.activeJobType);
   const extractionOptions = useAppStore((state) => state.extractionOptions);
   const setExtractionOptions = useAppStore((state) => state.setExtractionOptions);
+  const mergeAddInputRef = useRef<HTMLInputElement | null>(null);
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: {
@@ -123,6 +133,10 @@ export default function ActionPanel({
       return;
     }
     onReorderUploadedFiles(arrayMove(fileIds, oldIndex, newIndex));
+  };
+
+  const openMergeFilePicker = (): void => {
+    mergeAddInputRef.current?.click();
   };
 
   if (!activeJobType) {
@@ -197,16 +211,33 @@ export default function ActionPanel({
         {activeJobType === 'merge' ? <p>업로드된 파일 전체를 하나의 PDF로 병합합니다.</p> : null}
         {activeJobType === 'merge' ? (
           <section className="merge-order-box" aria-label="병합 파일 순서">
-            <h3>병합 파일 순서</h3>
+            <header className="merge-order-header">
+              <h3>병합 파일 순서</h3>
+              <button type="button" className="merge-add-button" onClick={openMergeFilePicker}>
+                PDF 추가
+              </button>
+              <input
+                ref={mergeAddInputRef}
+                className="upload-input-hidden"
+                aria-label="병합 PDF 추가 입력"
+                type="file"
+                accept="application/pdf"
+                multiple
+                onChange={(event) => {
+                  void onAddUploadedFiles(event.currentTarget.files);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </header>
             <p>드래그로 순서를 바꾸면 썸네일 프리뷰와 최종 병합 순서에 동시에 반영됩니다.</p>
             {uploadedFiles.length < 2 ? (
-              <p className="merge-order-empty">PDF를 2개 이상 업로드하면 순서를 조정할 수 있습니다.</p>
+              <p className="merge-order-empty">PDF를 2개 이상 업로드하면 순서를 조정하고 병합을 실행할 수 있습니다.</p>
             ) : (
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onMergeOrderDragEnd}>
                 <SortableContext items={uploadedFiles.map((file) => file.id)} strategy={verticalListSortingStrategy}>
                   <ul className="merge-order-list">
                     {uploadedFiles.map((file, index) => (
-                      <MergeOrderItem key={file.id} id={file.id} index={index} name={file.name} />
+                      <MergeOrderItem key={file.id} id={file.id} index={index} name={file.name} onRemove={onRemoveUploadedFile} />
                     ))}
                   </ul>
                 </SortableContext>

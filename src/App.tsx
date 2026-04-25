@@ -51,6 +51,8 @@ export default function App() {
               primaryPdfPageCount={workflow.primaryPdfPageCount}
               splitGroupStatus={splitGroupStatus}
               onSplitGroupStatusChange={setSplitGroupStatus}
+              onAddUploadedFiles={workflow.addUploadedFiles}
+              onRemoveUploadedFile={workflow.removeUploadedFile}
               onReorderUploadedFiles={workflow.reorderUploadedFiles}
             />
             <ProgressPanel

@@ -44,7 +44,8 @@ export default function BottomActionBar({
   const downloadableArtifacts = useMemo(() => getDownloadableArtifacts(artifacts), [artifacts]);
 
   const isRunning = status === 'running';
-  const canRun = uploadedFileCount > 0 && Boolean(activeJobType) && !isRunning;
+  const hasRunnableInput = activeJobType === 'merge' ? uploadedFileCount >= 2 : uploadedFileCount > 0;
+  const canRun = hasRunnableInput && Boolean(activeJobType) && !isRunning;
   const canCancel = isRunning;
   const canDownload = isExportReady(status) && downloadableArtifacts.length > 0 && !isExporting;
   const downloadKey = useMemo(

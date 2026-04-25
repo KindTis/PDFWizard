@@ -57,6 +57,10 @@ async function readFileBytes(file: File): Promise<ArrayBuffer> {
   return new TextEncoder().encode(text).buffer;
 }
 
+function createSourceKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
 type PdfJsPageCountDocument = {
   numPages: number;
   cleanup?: () => void;
@@ -209,6 +213,23 @@ export function reorderFilesAndThumbnails(
   return {
     files: reorderedFiles,
     thumbnails: assignThumbnailGlobalPageNumbers(reorderedFiles, reorderedThumbnails),
+  };
+}
+
+export function removeFileAndThumbnails(
+  files: RegisteredPdf[],
+  thumbnails: ThumbnailPreview[],
+  fileId: string,
+): { files: RegisteredPdf[]; thumbnails: ThumbnailPreview[] } {
+  if (!files.some((file) => file.id === fileId)) {
+    return { files, thumbnails };
+  }
+
+  const remainingFiles = files.filter((file) => file.id !== fileId);
+  const remainingThumbnails = thumbnails.filter((thumbnail) => thumbnail.fileId !== fileId);
+  return {
+    files: remainingFiles,
+    thumbnails: assignThumbnailGlobalPageNumbers(remainingFiles, remainingThumbnails),
   };
 }
 
@@ -690,6 +711,7 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
   const setArtifacts = useAppStore((state) => state.setArtifacts);
   const setError = useAppStore((state) => state.setError);
   const setReportSummary = useAppStore((state) => state.setReportSummary);
+  const resetJobResult = useAppStore((state) => state.resetJobResult);
 
   const registryRef = useRef(createFileRegistry());
   const workerRef = useRef<Worker | null>(null);
@@ -771,6 +793,7 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
               id: createId(),
               name: file.name,
               bytes,
+              sourceKey: createSourceKey(file),
               pageCount: await readPdfPageCount(bytes),
             };
           }),
@@ -887,6 +910,161 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       })();
     },
     [setError, setJobType, setStatus],
+  );
+
+  const addUploadedFiles = useCallback(
+    async (selected: FileList | null): Promise<void> => {
+      if (!selected || selected.length === 0) {
+        return;
+      }
+
+      const currentFiles = filesRef.current;
+      const knownSourceKeys = new Set(currentFiles.map((file) => file.sourceKey).filter((key): key is string => Boolean(key)));
+      const knownNames = new Set(currentFiles.map((file) => file.name.toLowerCase()));
+      const candidates = [...selected].filter((file) => file.name.toLowerCase().endsWith('.pdf'));
+      const uniqueCandidates = candidates.filter((file) => {
+        const sourceKey = createSourceKey(file);
+        return !knownSourceKeys.has(sourceKey) && !knownNames.has(file.name.toLowerCase());
+      });
+
+      if (candidates.length === 0) {
+        setThumbnailError('PDF 파일만 추가할 수 있습니다.');
+        return;
+      }
+      if (uniqueCandidates.length === 0) {
+        setThumbnailError('이미 추가된 PDF입니다.');
+        return;
+      }
+
+      const selectionToken = ++fileSelectionTokenRef.current;
+      const generationToken = ++thumbnailGenerationRef.current;
+      setThumbnailError(null);
+      setIsThumbnailLoading(true);
+
+      let mapped: RegisteredPdf[];
+      try {
+        mapped = await Promise.all(
+          uniqueCandidates.map(async (file) => {
+            const bytes = await readFileBytes(file);
+            return {
+              id: createId(),
+              name: file.name,
+              bytes,
+              sourceKey: createSourceKey(file),
+              pageCount: await readPdfPageCount(bytes),
+            };
+          }),
+        );
+      } catch {
+        if (fileSelectionTokenRef.current === selectionToken) {
+          setThumbnailError('PDF 파일을 읽지 못했습니다.');
+          setIsThumbnailLoading(false);
+        }
+        return;
+      }
+      if (fileSelectionTokenRef.current !== selectionToken) {
+        return;
+      }
+
+      const nextFiles = [...currentFiles, ...mapped];
+      registryRef.current.replaceAll(nextFiles);
+      setFiles(nextFiles);
+      resetJobResult();
+
+      const pendingForAddedFiles = mapped
+        .map((file) => {
+          const fileIndex = nextFiles.findIndex((item) => item.id === file.id);
+          return typeof file.pageCount === 'number' && file.pageCount > 0
+            ? createPendingThumbnails(file, fileIndex, file.pageCount, getGlobalPageNumber(nextFiles, file.id, 1) ?? 1)
+            : [];
+        })
+        .flat();
+      if (pendingForAddedFiles.length > 0) {
+        setThumbnails((current) => assignThumbnailGlobalPageNumbers(nextFiles, [...current, ...pendingForAddedFiles]));
+      }
+
+      void (async () => {
+        let hasFailure = false;
+        for (const file of mapped) {
+          const fileIndex = nextFiles.findIndex((item) => item.id === file.id);
+          if (thumbnailGenerationRef.current !== generationToken) {
+            return;
+          }
+
+          let document: PdfJsRenderDocument | null = null;
+          try {
+            document = await openPdfDocument(file.bytes, {
+              standardFontDataUrl: PDFJS_STANDARD_FONT_DATA_URL,
+              cMapUrl: PDFJS_CMAP_URL,
+              cMapPacked: true,
+              useSystemFonts: true,
+              useWorkerFetch: true,
+            });
+            if (thumbnailGenerationRef.current !== generationToken) {
+              return;
+            }
+
+            const totalPages = Number(document.numPages);
+            if (!Number.isInteger(totalPages) || totalPages < 1) {
+              throw new Error('THUMBNAIL_PAGE_COUNT_UNAVAILABLE');
+            }
+            setThumbnails((current) =>
+              assignThumbnailGlobalPageNumbers(
+                nextFiles,
+                ensureFileThumbnails(current, file, fileIndex, totalPages, getGlobalPageNumber(nextFiles, file.id, 1) ?? 1),
+              ),
+            );
+
+            const eagerPageCount = Math.min(THUMBNAIL_EAGER_PAGE_COUNT, totalPages);
+            for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+              if (thumbnailGenerationRef.current !== generationToken) {
+                return;
+              }
+              if (pageNumber > eagerPageCount) {
+                await waitForThumbnailTurn();
+              }
+
+              try {
+                const imageUrl = await renderPdfPageThumbnail(document, pageNumber);
+                if (thumbnailGenerationRef.current !== generationToken) {
+                  URL.revokeObjectURL(imageUrl);
+                  return;
+                }
+
+                thumbnailUrlsRef.current.push(imageUrl);
+                setThumbnails((current) => patchThumbnail(current, file.id, pageNumber, { imageUrl, status: 'ready' }));
+              } catch {
+                hasFailure = true;
+                if (thumbnailGenerationRef.current !== generationToken) {
+                  return;
+                }
+                setThumbnails((current) => patchThumbnail(current, file.id, pageNumber, { status: 'failed' }));
+              }
+            }
+          } catch {
+            hasFailure = true;
+            if (thumbnailGenerationRef.current !== generationToken) {
+              return;
+            }
+            setThumbnails((current) =>
+              current.map((thumbnail) =>
+                thumbnail.fileId === file.id && thumbnail.status !== 'ready' ? { ...thumbnail, status: 'failed' } : thumbnail,
+              ),
+            );
+          } finally {
+            document?.cleanup?.();
+            document?.destroy?.();
+          }
+        }
+
+        if (thumbnailGenerationRef.current !== generationToken) {
+          return;
+        }
+        setThumbnailError(hasFailure ? '일부 PDF 썸네일 미리보기를 생성하지 못했습니다.' : null);
+        setIsThumbnailLoading(false);
+      })();
+    },
+    [resetJobResult],
   );
 
   const runCurrentJob = useCallback(async (): Promise<void> => {
@@ -1013,6 +1191,33 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
     setThumbnails(reordered.thumbnails);
   }, []);
 
+  const removeUploadedFile = useCallback(
+    (fileId: string): void => {
+      const currentFiles = filesRef.current;
+      const currentThumbnails = thumbnailsRef.current;
+      if (!currentFiles.some((file) => file.id === fileId)) {
+        return;
+      }
+
+      const removedUrls = currentThumbnails
+        .filter((thumbnail) => thumbnail.fileId === fileId && thumbnail.imageUrl)
+        .map((thumbnail) => thumbnail.imageUrl)
+        .filter((url): url is string => Boolean(url));
+      revokeObjectUrls(removedUrls);
+      thumbnailUrlsRef.current = thumbnailUrlsRef.current.filter((url) => !removedUrls.includes(url));
+
+      const next = removeFileAndThumbnails(currentFiles, currentThumbnails, fileId);
+      registryRef.current.replaceAll(next.files);
+      setFiles(next.files);
+      setThumbnails(next.thumbnails);
+      resetJobResult();
+      if (next.files.length === 0) {
+        setJobType(null);
+      }
+    },
+    [resetJobResult, setJobType],
+  );
+
   return useMemo(
     () => ({
       uploadedFiles: files,
@@ -1022,10 +1227,23 @@ export function usePdfWorkflow(options: UsePdfWorkflowOptions = {}) {
       isThumbnailLoading,
       thumbnailError,
       onFilesSelected,
+      addUploadedFiles,
+      removeUploadedFile,
       reorderUploadedFiles,
       runCurrentJob,
       cancelCurrentJob,
     }),
-    [cancelCurrentJob, files, isThumbnailLoading, onFilesSelected, reorderUploadedFiles, runCurrentJob, thumbnailError, thumbnails],
+    [
+      addUploadedFiles,
+      cancelCurrentJob,
+      files,
+      isThumbnailLoading,
+      onFilesSelected,
+      removeUploadedFile,
+      reorderUploadedFiles,
+      runCurrentJob,
+      thumbnailError,
+      thumbnails,
+    ],
   );
 }

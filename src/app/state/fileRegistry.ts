@@ -2,6 +2,7 @@ import type { BinaryFile } from '../../worker/protocol';
 
 export type RegisteredPdf = BinaryFile & {
   pageCount?: number;
+  sourceKey?: string;
 };
 
 export function createFileRegistry() {
@@ -13,6 +14,13 @@ export function createFileRegistry() {
     },
     list(): RegisteredPdf[] {
       return [...files.values()];
+    },
+    remove(id: string): void {
+      files.delete(id);
+    },
+    replaceAll(nextFiles: RegisteredPdf[]): void {
+      files.clear();
+      nextFiles.forEach((file) => files.set(file.id, file));
     },
     clear(): void {
       files.clear();

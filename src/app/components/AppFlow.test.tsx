@@ -19,7 +19,7 @@ describe('App flow layout', () => {
     expect(screen.queryByLabelText('결과 내보내기 패널')).not.toBeInTheDocument();
   });
 
-  it('shows preview first and enables inspector only after selecting a job', async () => {
+  it('shows preview first and keeps merge execution disabled until two PDFs are selected', async () => {
     render(<App />);
 
     const input = screen.getByLabelText('PDF 업로드 입력') as HTMLInputElement;
@@ -38,7 +38,33 @@ describe('App flow layout', () => {
       const actionPanel = screen.getByLabelText('작업 인스펙터 패널');
       const actionBar = screen.getByLabelText('하단 작업 바');
       expect(within(actionPanel).getByText('현재 작업: 합치기')).toBeInTheDocument();
-      expect(within(actionBar).getByRole('button', { name: '실행' })).toBeEnabled();
+      expect(within(actionBar).getByRole('button', { name: '실행' })).toBeDisabled();
+    });
+  });
+
+  it('adds and removes PDFs from the merge menu', async () => {
+    render(<App />);
+
+    const input = screen.getByLabelText('PDF 업로드 입력') as HTMLInputElement;
+    const firstFile = new File([new Uint8Array([37, 80, 68, 70])], 'first.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [firstFile] } });
+    fireEvent.click(await screen.findByRole('tab', { name: /합치기/ }));
+
+    const mergeAddInput = await screen.findByLabelText('병합 PDF 추가 입력');
+    const secondFile = new File([new Uint8Array([37, 80, 68, 70])], 'second.pdf', { type: 'application/pdf' });
+    fireEvent.change(mergeAddInput, { target: { files: [secondFile] } });
+
+    await waitFor(() => {
+      expect(screen.getByText('first.pdf')).toBeInTheDocument();
+      expect(screen.getByText('second.pdf')).toBeInTheDocument();
+      expect(within(screen.getByLabelText('하단 작업 바')).getByRole('button', { name: '실행' })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'second.pdf 제거' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('second.pdf')).not.toBeInTheDocument();
+      expect(within(screen.getByLabelText('하단 작업 바')).getByRole('button', { name: '실행' })).toBeDisabled();
     });
   });
 
