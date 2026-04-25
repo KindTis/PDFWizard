@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useAppStore } from '../state/store';
+import ThemeToggle from './ThemeToggle';
 
 const STEPS = ['업로드', '작업', '내보내기'] as const;
 
@@ -30,6 +31,7 @@ export default function StepHeader({ uploadedFileCount }: StepHeaderProps) {
         <span className="brand-block__logo" aria-hidden="true" />
         <strong>PDFWizard</strong>
       </div>
+      <ThemeToggle />
 
       <ol className="sr-only" aria-label="현재 단계 안내">
         {STEPS.map((step, index) => (

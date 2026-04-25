@@ -13,6 +13,52 @@
   --accent-strong: #f54819;
   --accent-soft: #fff2ed;
   --shadow-soft: 0 10px 26px rgba(17, 24, 39, 0.06);
+  --text: #111827;
+  --text-strong: #1d273a;
+  --surface-alpha: rgba(255, 255, 255, 0.88);
+  --surface-solid-alpha: rgba(255, 255, 255, 0.96);
+  --top-shell-bg: linear-gradient(180deg, #f5f6f8 72%, rgba(245, 246, 248, 0));
+  --button-bg: #ffffff;
+  --button-bg-muted: #f5f7fa;
+  --button-text: #1f2a3d;
+  --field-bg: #ffffff;
+  --soft-panel-bg: #f9fafc;
+  --canvas-bg: #edf2fb;
+  --range-track-bg: #eceff5;
+  --separator-line: #d7deea;
+  --success-bg: #e9faf2;
+  --success-text: #1f9f62;
+  --danger-text: #b42318;
+}
+
+:root[data-theme='night'] {
+  color: #eef2f7;
+  --page-bg: #121418;
+  --surface: #1b2028;
+  --surface-muted: #222934;
+  --line: #343d4c;
+  --line-strong: #526070;
+  --text: #eef2f7;
+  --text-strong: #f8fafc;
+  --text-dim: #aab4c3;
+  --accent: #ff8459;
+  --accent-strong: #ff6b3d;
+  --accent-soft: #3a2922;
+  --shadow-soft: 0 14px 34px rgba(0, 0, 0, 0.34);
+  --surface-alpha: rgba(27, 32, 40, 0.92);
+  --surface-solid-alpha: rgba(27, 32, 40, 0.97);
+  --top-shell-bg: linear-gradient(180deg, #121418 72%, rgba(18, 20, 24, 0));
+  --button-bg: #242b36;
+  --button-bg-muted: #202631;
+  --button-text: #eef2f7;
+  --field-bg: #171c24;
+  --soft-panel-bg: #202631;
+  --canvas-bg: #283240;
+  --range-track-bg: #333d4c;
+  --separator-line: #465366;
+  --success-bg: #173426;
+  --success-text: #70d997;
+  --danger-text: #ff9a8f;
 }
 
 * {
@@ -23,7 +69,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background: var(--page-bg);
-  color: #111827;
+  color: var(--text);
 }
 
 #root {
@@ -54,7 +100,7 @@ body {
   top: 0;
   z-index: 20;
   padding: 2px 0 12px;
-  background: linear-gradient(180deg, #f5f6f8 72%, rgba(245, 246, 248, 0));
+  background: var(--top-shell-bg);
 }
 
 .top-header {
@@ -66,7 +112,7 @@ body {
   padding: 10px 18px;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface-alpha);
   box-shadow: var(--shadow-soft);
 }
 
@@ -90,6 +136,61 @@ body {
   background:
     conic-gradient(from 210deg at 52% 46%, #ff5c2b 0%, #ff7f57 36%, #ff4114 76%, #ff5c2b 100%);
   box-shadow: inset -4px -6px 10px rgba(120, 15, 0, 0.12);
+}
+
+.theme-toggle {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 4px 10px 4px 5px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  font-family: 'Manrope', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--line-strong);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.theme-toggle__track {
+  width: 48px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  position: relative;
+}
+
+.theme-toggle__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 5px 12px rgba(255, 77, 31, 0.3);
+  transition: transform 0.2s ease;
+}
+
+:root[data-theme='night'] .theme-toggle__thumb {
+  transform: translateX(20px);
+}
+
+.theme-toggle__label {
+  min-width: 38px;
+  text-align: left;
 }
 
 .job-type-selector {
@@ -1028,6 +1129,153 @@ body {
 .action-btn.is-ghost {
   background: #f5f7fa;
   color: #404c63;
+}
+
+:root[data-theme='night'] .top-header,
+:root[data-theme='night'] .job-type-selector__tabs,
+:root[data-theme='night'] .thumbnail-workspace,
+:root[data-theme='night'] .action-panel,
+:root[data-theme='night'] .progress-panel,
+:root[data-theme='night'] .upload-zone,
+:root[data-theme='night'] .bottom-action-bar {
+  background: var(--surface-alpha);
+}
+
+:root[data-theme='night'] .job-type-selector__tabs,
+:root[data-theme='night'] .thumbnail-canvas,
+:root[data-theme='night'] .upload-dropzone,
+:root[data-theme='night'] .merge-order-box,
+:root[data-theme='night'] .inspector-card,
+:root[data-theme='night'] .split-group-list li,
+:root[data-theme='night'] .progress-panel {
+  background: var(--surface-muted);
+}
+
+:root[data-theme='night'] .job-type-tab,
+:root[data-theme='night'] .canvas-icon-btn,
+:root[data-theme='night'] .split-mode-btn,
+:root[data-theme='night'] .split-group-list button,
+:root[data-theme='night'] .merge-order-item,
+:root[data-theme='night'] .merge-order-handle,
+:root[data-theme='night'] .upload-control,
+:root[data-theme='night'] .action-btn,
+:root[data-theme='night'] .filename-preview {
+  background: var(--button-bg);
+  color: var(--button-text);
+}
+
+:root[data-theme='night'] .job-type-tab:hover:enabled {
+  background: #2a3340;
+  border-color: var(--line-strong);
+}
+
+:root[data-theme='night'] .job-type-tab.is-selected,
+:root[data-theme='night'] .canvas-icon-btn.is-active,
+:root[data-theme='night'] .split-mode-btn.is-selected {
+  background: var(--accent-soft);
+  border-color: #704230;
+  color: var(--accent);
+}
+
+:root[data-theme='night'] .thumbnail-card {
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+:root[data-theme='night'] .thumbnail-card.is-in-range {
+  background: #302720;
+  border-color: #704230;
+}
+
+:root[data-theme='night'] .thumbnail-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(255, 132, 89, 0.78);
+}
+
+:root[data-theme='night'] .thumbnail-card__image,
+:root[data-theme='night'] .thumbnail-card__placeholder {
+  background: var(--canvas-bg);
+  border-color: var(--line);
+}
+
+:root[data-theme='night'] .thumbnail-separator::before,
+:root[data-theme='night'] .thumbnail-separator::after {
+  background: var(--separator-line);
+}
+
+:root[data-theme='night'] .split-range-visual__track,
+:root[data-theme='night'] .bottom-action-bar__track {
+  background: var(--range-track-bg);
+}
+
+:root[data-theme='night'] .split-range-controls input[type='number'],
+:root[data-theme='night'] .filename-preview input {
+  background: var(--field-bg);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+:root[data-theme='night'] .inspector-card header span {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+:root[data-theme='night'] .progress-error {
+  color: var(--danger-text);
+}
+
+:root[data-theme='night'] .brand-block strong,
+:root[data-theme='night'] .workspace-file-meta h2,
+:root[data-theme='night'] .action-panel h2,
+:root[data-theme='night'] .progress-panel h2,
+:root[data-theme='night'] .upload-dropzone h3,
+:root[data-theme='night'] .inspector-settings h3,
+:root[data-theme='night'] .split-editor h3,
+:root[data-theme='night'] .inspector-card h3,
+:root[data-theme='night'] .merge-order-box h3,
+:root[data-theme='night'] .bottom-action-bar__title,
+:root[data-theme='night'] .thumbnail-card__label,
+:root[data-theme='night'] .split-group-list strong,
+:root[data-theme='night'] .inspector-fieldset legend,
+:root[data-theme='night'] .merge-order-name,
+:root[data-theme='night'] .progress-panel dd,
+:root[data-theme='night'] .inspector-card__range {
+  color: var(--text-strong);
+}
+
+:root[data-theme='night'] .workspace-file-meta p,
+:root[data-theme='night'] .action-panel__description,
+:root[data-theme='night'] .inspector-job-label,
+:root[data-theme='night'] .split-range-scale,
+:root[data-theme='night'] .split-range-current,
+:root[data-theme='night'] .split-group-list span,
+:root[data-theme='night'] .merge-order-box > p,
+:root[data-theme='night'] .merge-order-empty,
+:root[data-theme='night'] .merge-order-index,
+:root[data-theme='night'] .inspector-card p,
+:root[data-theme='night'] .filename-preview strong,
+:root[data-theme='night'] .inspector-settings label,
+:root[data-theme='night'] .progress-panel dt,
+:root[data-theme='night'] .progress-panel__status,
+:root[data-theme='night'] .bottom-action-bar__message,
+:root[data-theme='night'] .bottom-action-bar__status p,
+:root[data-theme='night'] .thumbnail-card__global-label,
+:root[data-theme='night'] .thumbnail-loading-hint,
+:root[data-theme='night'] .workspace-hint,
+:root[data-theme='night'] .upload-dropzone p,
+:root[data-theme='night'] .upload-meta,
+:root[data-theme='night'] .uploaded-file-list,
+:root[data-theme='night'] .thumbnail-separator {
+  color: var(--text-dim);
+}
+
+:root[data-theme='night'] .action-btn.is-ghost {
+  background: var(--button-bg-muted);
+  color: var(--button-text);
+}
+
+:root[data-theme='night'] .action-btn.is-primary {
+  color: #ffffff;
 }
 
 @media (max-width: 1240px) {
