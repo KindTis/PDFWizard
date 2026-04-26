@@ -1,7 +1,7 @@
 import { closestCenter, DndContext, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JobType } from '../../worker/protocol';
 import type { RegisteredPdf } from '../state/fileRegistry';
 import { useAppStore } from '../state/store';
@@ -140,6 +140,12 @@ export default function ActionPanel({
   const openMergeFilePicker = (): void => {
     mergeAddInputRef.current?.click();
   };
+
+  useEffect(() => {
+    if (activeJobType !== 'split') {
+      setSplitMode('range');
+    }
+  }, [activeJobType]);
 
   if (!activeJobType) {
     return null;

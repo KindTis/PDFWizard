@@ -221,4 +221,43 @@ describe('ThumbnailWorkspace', () => {
     expect(screen.getByLabelText('first.pdf 3페이지 분할 그룹')).toHaveTextContent('G2');
     expect(screen.getByLabelText('second.pdf 1페이지 분할 그룹')).toHaveTextContent('G2');
   });
+
+  it('hides split group badges when the active job is not split', () => {
+    act(() => {
+      useAppStore.getState().setJobType('merge');
+    });
+    const thumbnails = [
+      createThumbnail({ fileId: 'a', fileName: 'first.pdf', fileIndex: 0, pageNumber: 3, globalPageNumber: 3 }),
+      createThumbnail({ fileId: 'b', fileName: 'second.pdf', fileIndex: 1, pageNumber: 1, globalPageNumber: 4 }),
+    ];
+
+    render(
+      <ThumbnailWorkspace
+        uploadedFileCount={2}
+        primaryPdfPageCount={3}
+        primaryFileSizeBytes={1024}
+        uploadedFileNames={['first.pdf', 'second.pdf']}
+        thumbnails={thumbnails}
+        isThumbnailLoading={false}
+        thumbnailError={null}
+        onFilesSelected={() => {}}
+        selectedRange="3-4"
+        selectedGroups={[
+          {
+            id: 'group-1',
+            label: 'split-part-1',
+            globalRange: '3-4',
+            segments: [
+              { fileId: 'a', startPage: 3, endPage: 3 },
+              { fileId: 'b', startPage: 1, endPage: 1 },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByLabelText('first.pdf 3페이지 분할 그룹')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('second.pdf 1페이지 분할 그룹')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('listitem').filter((item) => item.className.includes('is-in-range'))).toHaveLength(0);
+  });
 });

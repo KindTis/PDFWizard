@@ -87,12 +87,18 @@ export default function ThumbnailWorkspace({
   selectedGroups,
 }: ThumbnailWorkspaceProps) {
   const activeJobType = useAppStore((state) => state.activeJobType);
+  const isSplitJob = activeJobType === 'split';
   const hasFiles = uploadedFileCount > 0;
   const [selectedThumbnailKey, setSelectedThumbnailKey] = useState<string | null>(null);
   const [zoomPercent, setZoomPercent] = useState(100);
   const primaryTotalPages = primaryPdfPageCount ?? thumbnails.filter((thumbnail) => thumbnail.fileIndex === 0).length;
   const previewTotalPages = thumbnails.length > 0 ? thumbnails.length : primaryTotalPages;
-  const selectedRangePages = useMemo(() => resolveSelectedPages(selectedRange, primaryTotalPages), [primaryTotalPages, selectedRange]);
+  const effectiveSelectedRange = isSplitJob ? selectedRange : null;
+  const effectiveSelectedGroups = isSplitJob ? selectedGroups : [];
+  const selectedRangePages = useMemo(
+    () => resolveSelectedPages(effectiveSelectedRange, primaryTotalPages),
+    [effectiveSelectedRange, primaryTotalPages],
+  );
   const thumbnailGridStyle = {
     '--thumbnail-card-min-width': `${Math.round((THUMBNAIL_BASE_WIDTH * zoomPercent) / 100)}px`,
   } as CSSProperties;
@@ -171,9 +177,9 @@ export default function ThumbnailWorkspace({
                 {thumbnails.map((thumbnail, index) => {
                   const thumbnailKey = toThumbnailKey(thumbnail);
                   const isSelected = selectedThumbnailKey === thumbnailKey;
-                  const splitGroupBadges = getPageSplitGroupBadges(thumbnail.fileId, thumbnail.pageNumber, selectedGroups);
+                  const splitGroupBadges = getPageSplitGroupBadges(thumbnail.fileId, thumbnail.pageNumber, effectiveSelectedGroups);
                   const isInSelectedRange =
-                    selectedGroups.length > 0
+                    effectiveSelectedGroups.length > 0
                       ? splitGroupBadges.length > 0
                       : thumbnail.fileIndex === 0 && selectedRangePages.has(thumbnail.pageNumber);
                   const startsAnotherPdf =
@@ -211,7 +217,7 @@ export default function ThumbnailWorkspace({
                             </span>
                           ) : null}
                           <p className="thumbnail-card__label">{thumbnail.pageNumber}</p>
-                          {activeJobType === 'split' && uploadedFileCount > 1 ? (
+                          {isSplitJob && uploadedFileCount > 1 ? (
                             <p className="thumbnail-card__global-label">전체 {thumbnail.globalPageNumber}</p>
                           ) : null}
                         </button>

@@ -108,4 +108,31 @@ describe('App flow layout', () => {
       expect(within(screen.getByLabelText('진행 상태 패널')).getByText('2개')).toBeInTheDocument();
     });
   });
+
+  it('clears split summaries and preview group badges when switching away from split mode', async () => {
+    render(<App />);
+
+    const input = screen.getByLabelText('PDF 업로드 입력') as HTMLInputElement;
+    const file = new File([new Uint8Array([37, 80, 68, 70])], 'split-source.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(await screen.findByRole('tab', { name: /분할/ }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('전체 시작 페이지')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('전체 끝 페이지'), { target: { value: '3' } });
+
+    await waitFor(() => {
+      expect(within(screen.getByLabelText('진행 상태 패널')).getByText('1-3')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /합치기/ }));
+
+    await waitFor(() => {
+      const progressPanel = screen.getByLabelText('진행 상태 패널');
+      const selectedRangeRow = within(progressPanel).getByText('선택 범위').closest('div');
+      expect(selectedRangeRow?.querySelector('dd')).toHaveTextContent('-');
+    });
+  });
 });

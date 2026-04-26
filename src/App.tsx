@@ -1,5 +1,5 @@
 import './styles/app.css';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ActionPanel from './app/components/ActionPanel';
 import BottomActionBar from './app/components/BottomActionBar';
 import JobTypeSelector from './app/components/JobTypeSelector';
@@ -10,18 +10,42 @@ import ThumbnailWorkspace from './app/components/ThumbnailWorkspace';
 import { usePdfWorkflow } from './app/hooks/usePdfWorkflow';
 import { useAppStore } from './app/state/store';
 
+const EMPTY_SPLIT_GROUP_STATUS: SplitGroupStatus = {
+  groupCount: 0,
+  latestRange: null,
+  mergedRange: null,
+  groups: [],
+  previewGroups: [],
+};
+
+function hasSplitGroupStatus(status: SplitGroupStatus): boolean {
+  return (
+    status.groupCount > 0 ||
+    status.latestRange !== null ||
+    status.mergedRange !== null ||
+    status.groups.length > 0 ||
+    status.previewGroups.length > 0
+  );
+}
+
 export default function App() {
-  const [splitGroupStatus, setSplitGroupStatus] = useState<SplitGroupStatus>({
-    groupCount: 0,
-    latestRange: null,
-    mergedRange: null,
-    groups: [],
-    previewGroups: [],
-  });
-  const workflow = usePdfWorkflow({ splitRanges: splitGroupStatus.mergedRange, splitGroups: splitGroupStatus.groups });
   const activeJobType = useAppStore((state) => state.activeJobType);
+  const [splitGroupStatus, setSplitGroupStatus] = useState<SplitGroupStatus>(EMPTY_SPLIT_GROUP_STATUS);
+  const isSplitJob = activeJobType === 'split';
+  const effectiveSplitGroupStatus = isSplitJob ? splitGroupStatus : EMPTY_SPLIT_GROUP_STATUS;
+  const workflow = usePdfWorkflow({
+    splitRanges: effectiveSplitGroupStatus.mergedRange,
+    splitGroups: effectiveSplitGroupStatus.groups,
+  });
   const primaryFile = workflow.uploadedFiles[0] ?? null;
   const showInspector = workflow.uploadedFileCount > 0 && Boolean(activeJobType);
+
+  useEffect(() => {
+    if (isSplitJob || !hasSplitGroupStatus(splitGroupStatus)) {
+      return;
+    }
+    setSplitGroupStatus(EMPTY_SPLIT_GROUP_STATUS);
+  }, [isSplitJob, splitGroupStatus]);
 
   return (
     <main role="main" className="app-shell">
@@ -39,8 +63,8 @@ export default function App() {
           isThumbnailLoading={workflow.isThumbnailLoading}
           thumbnailError={workflow.thumbnailError}
           onFilesSelected={workflow.onFilesSelected}
-          selectedRange={splitGroupStatus.latestRange}
-          selectedGroups={splitGroupStatus.previewGroups}
+          selectedRange={effectiveSplitGroupStatus.latestRange}
+          selectedGroups={effectiveSplitGroupStatus.previewGroups}
         />
         {showInspector ? (
           <aside aria-label="제어 사이드바" className="control-sidebar">
@@ -57,7 +81,7 @@ export default function App() {
             />
             <ProgressPanel
               uploadedFiles={workflow.uploadedFiles}
-              selectedRange={splitGroupStatus.mergedRange}
+              selectedRange={effectiveSplitGroupStatus.mergedRange}
             />
           </aside>
         ) : null}
