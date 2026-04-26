@@ -90,4 +90,22 @@ describe('App flow layout', () => {
     const actionPanel = screen.getByLabelText('작업 인스펙터 패널');
     expect(within(actionPanel).getByText(/페이지 1-3/)).toBeInTheDocument();
   });
+
+  it('supports page-count split mode and syncs generated range summary', async () => {
+    render(<App />);
+
+    const input = screen.getByLabelText('PDF 업로드 입력') as HTMLInputElement;
+    const file = new File([new Uint8Array([37, 80, 68, 70])], 'split-source.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(await screen.findByRole('tab', { name: /분할/ }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '페이지 수로 분할' }));
+    fireEvent.change(screen.getByLabelText('분할 단위'), { target: { value: '4' } });
+
+    await waitFor(() => {
+      const actionPanel = screen.getByLabelText('작업 인스펙터 패널');
+      expect(within(actionPanel).getByText(/전체 페이지 1-4,5/)).toBeInTheDocument();
+      expect(within(screen.getByLabelText('진행 상태 패널')).getByText('2개')).toBeInTheDocument();
+    });
+  });
 });

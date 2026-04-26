@@ -1,11 +1,12 @@
 import { closestCenter, DndContext, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { JobType } from '../../worker/protocol';
 import type { RegisteredPdf } from '../state/fileRegistry';
 import { useAppStore } from '../state/store';
 import { formatSplitGroupSummary } from '../../domain/crossPdfSplit';
+import PageCountSplitEditor from './PageCountSplitEditor';
 import SplitGroupEditor, { type SplitGroupStatus } from './SplitGroupEditor';
 
 const JOB_LABELS: Record<JobType, string> = {
@@ -107,6 +108,7 @@ export default function ActionPanel({
   const extractionOptions = useAppStore((state) => state.extractionOptions);
   const setExtractionOptions = useAppStore((state) => state.setExtractionOptions);
   const mergeAddInputRef = useRef<HTMLInputElement | null>(null);
+  const [splitMode, setSplitMode] = useState<'range' | 'page-count'>('range');
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: {
@@ -155,19 +157,36 @@ export default function ActionPanel({
         <section className="inspector-settings" aria-label="분할 방식">
           <h3>분할 방식</h3>
           <div className="split-mode-buttons">
-            <button type="button" className="split-mode-btn is-selected" aria-current="true">
+            <button
+              type="button"
+              className={`split-mode-btn${splitMode === 'range' ? ' is-selected' : ''}`}
+              aria-current={splitMode === 'range' ? 'true' : undefined}
+              onClick={() => setSplitMode('range')}
+            >
               페이지 범위로 분할
             </button>
-            <button type="button" className="split-mode-btn" disabled>
+            <button
+              type="button"
+              className={`split-mode-btn${splitMode === 'page-count' ? ' is-selected' : ''}`}
+              aria-current={splitMode === 'page-count' ? 'true' : undefined}
+              onClick={() => setSplitMode('page-count')}
+            >
               페이지 수로 분할
             </button>
           </div>
         </section>
 
-        <SplitGroupEditor
-          uploadedFiles={uploadedFiles}
-          onStatusChange={onSplitGroupStatusChange}
-        />
+        {splitMode === 'range' ? (
+          <SplitGroupEditor
+            uploadedFiles={uploadedFiles}
+            onStatusChange={onSplitGroupStatusChange}
+          />
+        ) : (
+          <PageCountSplitEditor
+            uploadedFiles={uploadedFiles}
+            onStatusChange={onSplitGroupStatusChange}
+          />
+        )}
 
         <section className="inspector-card" aria-label="생성될 파일">
           <header>

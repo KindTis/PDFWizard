@@ -100,6 +100,20 @@ export function createSplitGroupFromGlobalRange(
   };
 }
 
+export function createSplitGroupsByPageCount(files: SplitSource[], pagesPerGroup: number): SplitGroup[] {
+  const totalPages = getTotalPageCount(files);
+  if (totalPages < 1 || !Number.isInteger(pagesPerGroup) || pagesPerGroup < 1) {
+    throw new Error('OUT_OF_RANGE');
+  }
+
+  const groups: SplitGroup[] = [];
+  for (let start = 1; start <= totalPages; start += pagesPerGroup) {
+    const end = Math.min(totalPages, start + pagesPerGroup - 1);
+    groups.push(createSplitGroupFromGlobalRange(files, start, end, groups.length + 1));
+  }
+  return groups;
+}
+
 function formatSegmentRange(segment: SplitSegment): string {
   return segment.startPage === segment.endPage ? `${segment.startPage}페이지` : `${segment.startPage}-${segment.endPage}페이지`;
 }
